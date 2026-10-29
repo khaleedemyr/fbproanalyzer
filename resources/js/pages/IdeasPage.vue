@@ -1,11 +1,15 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import http from '../api/http';
 
+const router = useRouter();
 const ideas = ref([]);
 const loading = ref(true);
 const generating = ref(false);
+const makingId = ref(null);
 const message = ref('');
+const error = ref('');
 
 const form = reactive({
     title: '',
@@ -61,6 +65,23 @@ async function removeIdea(id) {
     await load();
 }
 
+async function makeBlueprint(idea) {
+    makingId.value = idea.id;
+    message.value = '';
+    error.value = '';
+    try {
+        const { data } = await http.post('/blueprints/generate', {
+            content_idea_id: idea.id,
+        });
+        message.value = `Blueprint siap: ${data.data.cover_theme || data.data.title}`;
+        router.push({ name: 'blueprint-detail', params: { id: data.data.id } });
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal buat blueprint.';
+    } finally {
+        makingId.value = null;
+    }
+}
+
 onMounted(load);
 </script>
 
@@ -81,6 +102,7 @@ onMounted(load);
         </div>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>
+        <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
 
         <section class="rounded-xl border border-slate-200 bg-white p-5">
             <h3 class="font-semibold text-slate-900">Tambah ide manual</h3>
@@ -110,6 +132,13 @@ onMounted(load);
                 <p class="mt-2 text-sm text-slate-600">{{ idea.hook || idea.angle }}</p>
                 <p class="mt-2 text-xs text-slate-500">{{ idea.format }} · {{ idea.topic_cluster || '-' }} · {{ idea.status }}</p>
                 <div class="mt-4 flex flex-wrap gap-2">
+                    <button
+                        class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 disabled:opacity-60"
+                        :disabled="makingId === idea.id"
+                        @click="makeBlueprint(idea)"
+                    >
+                        {{ makingId === idea.id ? 'Blueprint...' : 'Buat Blueprint' }}
+                    </button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'in_progress')">Kerjakan</button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'published')">Sudah publish</button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'rejected')">Tolak</button>

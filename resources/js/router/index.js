@@ -49,6 +49,26 @@ const routes = [
                 name: 'ideas',
                 component: () => import('../pages/IdeasPage.vue'),
             },
+            {
+                path: 'blueprints',
+                name: 'blueprints',
+                component: () => import('../pages/BlueprintsPage.vue'),
+            },
+            {
+                path: 'blueprints/:id',
+                name: 'blueprint-detail',
+                component: () => import('../pages/BlueprintDetailPage.vue'),
+            },
+            {
+                path: 'calendar',
+                name: 'calendar',
+                component: () => import('../pages/CalendarPage.vue'),
+            },
+            {
+                path: 'brand-kit',
+                name: 'brand-kit',
+                component: () => import('../pages/BrandKitPage.vue'),
+            },
         ],
     },
 ];

@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BlueprintController;
+use App\Http\Controllers\Api\BrandKitController;
 use App\Http\Controllers\Api\ContentIdeaController;
 use App\Http\Controllers\Api\ContentPostController;
 use App\Http\Controllers\Api\DashboardController;
@@ -45,4 +47,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('ideas/generate', [ContentIdeaController::class, 'generate']);
     Route::patch('ideas/{contentIdea}', [ContentIdeaController::class, 'update']);
     Route::delete('ideas/{contentIdea}', [ContentIdeaController::class, 'destroy']);
+
+    Route::get('brand-kit', [BrandKitController::class, 'show']);
+    Route::put('brand-kit', [BrandKitController::class, 'update']);
+
+    Route::get('blueprints', [BlueprintController::class, 'index']);
+    Route::post('blueprints/generate', [BlueprintController::class, 'generate']);
+    Route::get('blueprints/{blueprint}', [BlueprintController::class, 'show']);
+    Route::patch('blueprints/{blueprint}', [BlueprintController::class, 'update']);
+    Route::delete('blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
+    Route::get('blueprints/{blueprint}/export', [BlueprintController::class, 'export']);
 });

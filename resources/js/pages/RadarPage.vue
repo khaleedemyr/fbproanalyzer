@@ -1,9 +1,12 @@
 <script setup>
 import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import http from '../api/http';
 
+const router = useRouter();
 const loading = ref(true);
 const syncing = ref(false);
+const makingId = ref(null);
 const data = ref(null);
 const message = ref('');
 const error = ref('');
@@ -49,6 +52,25 @@ async function runSync() {
         error.value = e.response?.data?.message || 'Gagal menjalankan auto radar.';
     } finally {
         syncing.value = false;
+    }
+}
+
+async function makeBlueprint(signal, event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    makingId.value = signal.id;
+    message.value = '';
+    error.value = '';
+    try {
+        const { data: res } = await http.post('/blueprints/generate', {
+            trend_signal_id: signal.id,
+        });
+        message.value = `Blueprint siap: ${res.data.cover_theme || res.data.title}`;
+        router.push({ name: 'blueprint-detail', params: { id: res.data.id } });
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal buat blueprint dari sinyal.';
+    } finally {
+        makingId.value = null;
     }
 }
 
@@ -98,14 +120,12 @@ onMounted(load);
             <section class="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <div class="border-b border-slate-100 px-4 py-3 font-semibold text-slate-900">Sinyal viral terdeteksi</div>
                 <div class="divide-y divide-slate-100">
-                    <a
+                    <div
                         v-for="signal in data.signals"
                         :key="signal.id"
-                        :href="signal.url || '#'"
-                        :target="signal.url ? '_blank' : undefined"
                         class="flex items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50"
                     >
-                        <div>
+                        <div class="min-w-0 flex-1">
                             <div class="mb-1 flex flex-wrap items-center gap-2">
                                 <span
                                     class="rounded px-2 py-0.5 text-[11px] font-semibold"
@@ -115,15 +135,30 @@ onMounted(load);
                                 </span>
                                 <span class="text-[11px] text-slate-500">{{ signal.format }}</span>
                             </div>
-                            <p class="text-sm font-medium text-slate-900">{{ signal.title || signal.keyword }}</p>
+                            <a
+                                :href="signal.url || undefined"
+                                :target="signal.url ? '_blank' : undefined"
+                                class="text-sm font-medium text-slate-900 hover:text-teal-800"
+                                :class="signal.url ? 'underline-offset-2 hover:underline' : 'pointer-events-none'"
+                            >
+                                {{ signal.title || signal.keyword }}
+                            </a>
                             <p class="mt-1 text-xs text-slate-500">
                                 keyword: {{ signal.keyword }}
                                 <span v-if="signal.metric_value"> · metric {{ signal.metric_value }}</span>
                             </p>
                             <p v-if="signal.snippet" class="mt-1 line-clamp-2 text-xs text-slate-600">{{ signal.snippet }}</p>
+                            <button
+                                type="button"
+                                class="mt-2 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 disabled:opacity-60"
+                                :disabled="makingId === signal.id"
+                                @click="makeBlueprint(signal, $event)"
+                            >
+                                {{ makingId === signal.id ? 'Membuat...' : 'Buat Blueprint' }}
+                            </button>
                         </div>
                         <span class="shrink-0 rounded-md bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800">{{ signal.viral_score }}</span>
-                    </a>
+                    </div>
                     <p v-if="!data.signals.length" class="px-4 py-8 text-center text-sm text-slate-500">
                         Belum ada sinyal. Klik <strong>Jalankan Auto Radar</strong>.
                     </p>

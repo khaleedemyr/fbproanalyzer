@@ -45,4 +45,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(ContentIdea::class);
     }
+
+    public function brandKits(): HasMany
+    {
+        return $this->hasMany(BrandKit::class);
+    }
+
+    public function contentBlueprints(): HasMany
+    {
+        return $this->hasMany(ContentBlueprint::class);
+    }
 }

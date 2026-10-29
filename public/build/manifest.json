@@ -40,7 +40,7 @@
     "name": "http"
   },
   "resources/css/app.css": {
-    "file": "assets/app-DUhWxUpH.css",
+    "file": "assets/app-C1CWiMgZ.css",
     "name": "app",
     "names": [
       "app.css"
@@ -49,7 +49,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-B7werJFu.js",
+    "file": "assets/app-CFsIQZvA.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -65,11 +65,15 @@
       "resources/js/pages/PostsPage.vue",
       "resources/js/pages/AccountsPage.vue",
       "resources/js/pages/WatchlistPage.vue",
-      "resources/js/pages/IdeasPage.vue"
+      "resources/js/pages/IdeasPage.vue",
+      "resources/js/pages/BlueprintsPage.vue",
+      "resources/js/pages/BlueprintDetailPage.vue",
+      "resources/js/pages/CalendarPage.vue",
+      "resources/js/pages/BrandKitPage.vue"
     ]
   },
   "resources/js/layouts/AppLayout.vue": {
-    "file": "assets/AppLayout-DpaN-HyE.js",
+    "file": "assets/AppLayout-BFXX7t8U.js",
     "name": "AppLayout",
     "src": "resources/js/layouts/AppLayout.vue",
     "isDynamicEntry": true,
@@ -79,7 +83,7 @@
     ]
   },
   "resources/js/pages/AccountsPage.vue": {
-    "file": "assets/AccountsPage-D06wemya.js",
+    "file": "assets/AccountsPage-Cyl0AtP-.js",
     "name": "AccountsPage",
     "src": "resources/js/pages/AccountsPage.vue",
     "isDynamicEntry": true,
@@ -88,8 +92,48 @@
       "resources/js/app.js"
     ]
   },
+  "resources/js/pages/BlueprintDetailPage.vue": {
+    "file": "assets/BlueprintDetailPage-CuVMLvT1.js",
+    "name": "BlueprintDetailPage",
+    "src": "resources/js/pages/BlueprintDetailPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-COO143JM.js",
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/BlueprintsPage.vue": {
+    "file": "assets/BlueprintsPage-Dk1OWk2r.js",
+    "name": "BlueprintsPage",
+    "src": "resources/js/pages/BlueprintsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-COO143JM.js",
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/BrandKitPage.vue": {
+    "file": "assets/BrandKitPage-Dr_QlRWg.js",
+    "name": "BrandKitPage",
+    "src": "resources/js/pages/BrandKitPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-COO143JM.js",
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/CalendarPage.vue": {
+    "file": "assets/CalendarPage-BoDgtVgr.js",
+    "name": "CalendarPage",
+    "src": "resources/js/pages/CalendarPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-COO143JM.js",
+      "resources/js/app.js"
+    ]
+  },
   "resources/js/pages/DashboardPage.vue": {
-    "file": "assets/DashboardPage-Cp2m02iZ.js",
+    "file": "assets/DashboardPage-DWHKT2Gb.js",
     "name": "DashboardPage",
     "src": "resources/js/pages/DashboardPage.vue",
     "isDynamicEntry": true,
@@ -99,7 +143,7 @@
     ]
   },
   "resources/js/pages/IdeasPage.vue": {
-    "file": "assets/IdeasPage-C00Q0Lch.js",
+    "file": "assets/IdeasPage-RglrfAbP.js",
     "name": "IdeasPage",
     "src": "resources/js/pages/IdeasPage.vue",
     "isDynamicEntry": true,
@@ -109,7 +153,7 @@
     ]
   },
   "resources/js/pages/LoginPage.vue": {
-    "file": "assets/LoginPage-BN5SEWrT.js",
+    "file": "assets/LoginPage-dQePPXdN.js",
     "name": "LoginPage",
     "src": "resources/js/pages/LoginPage.vue",
     "isDynamicEntry": true,
@@ -119,7 +163,7 @@
     ]
   },
   "resources/js/pages/PostsPage.vue": {
-    "file": "assets/PostsPage-BYpzB6yG.js",
+    "file": "assets/PostsPage-Bkki956x.js",
     "name": "PostsPage",
     "src": "resources/js/pages/PostsPage.vue",
     "isDynamicEntry": true,
@@ -129,16 +173,17 @@
     ]
   },
   "resources/js/pages/RadarPage.vue": {
-    "file": "assets/RadarPage-OHckAE4M.js",
+    "file": "assets/RadarPage-3lO-RO5J.js",
     "name": "RadarPage",
     "src": "resources/js/pages/RadarPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js"
+      "_http-COO143JM.js",
+      "resources/js/app.js"
     ]
   },
   "resources/js/pages/RegisterPage.vue": {
-    "file": "assets/RegisterPage--IcxowyS.js",
+    "file": "assets/RegisterPage-BHbcg2M7.js",
     "name": "RegisterPage",
     "src": "resources/js/pages/RegisterPage.vue",
     "isDynamicEntry": true,
@@ -148,7 +193,7 @@
     ]
   },
   "resources/js/pages/WatchlistPage.vue": {
-    "file": "assets/WatchlistPage-f-HJMoMY.js",
+    "file": "assets/WatchlistPage-BXJN74FM.js",
     "name": "WatchlistPage",
     "src": "resources/js/pages/WatchlistPage.vue",
     "isDynamicEntry": true,

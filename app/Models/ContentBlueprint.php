@@ -1,0 +1,53 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class ContentBlueprint extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'brand_kit_id',
+        'content_idea_id',
+        'trend_signal_id',
+        'title',
+        'cover_theme',
+        'story_concept',
+        'source_topic',
+        'status',
+        'scenes',
+        'thumbnail_prompt',
+        'caption',
+        'planned_date',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'scenes' => 'array',
+            'planned_date' => 'date',
+        ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function brandKit(): BelongsTo
+    {
+        return $this->belongsTo(BrandKit::class);
+    }
+
+    public function contentIdea(): BelongsTo
+    {
+        return $this->belongsTo(ContentIdea::class);
+    }
+
+    public function trendSignal(): BelongsTo
+    {
+        return $this->belongsTo(TrendSignal::class);
+    }
+}

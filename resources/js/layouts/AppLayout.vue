@@ -9,6 +9,9 @@ const links = [
     { to: '/', label: 'Dashboard', name: 'dashboard' },
     { to: '/radar', label: 'Auto Radar', name: 'radar' },
     { to: '/ideas', label: 'Ide Konten', name: 'ideas' },
+    { to: '/blueprints', label: 'Blueprint', name: 'blueprints' },
+    { to: '/calendar', label: 'Kalender', name: 'calendar' },
+    { to: '/brand-kit', label: 'Brand Kit', name: 'brand-kit' },
     { to: '/watchlist', label: 'Watchlist', name: 'watchlist' },
     { to: '/accounts', label: 'Akun Meta', name: 'accounts' },
 ];
