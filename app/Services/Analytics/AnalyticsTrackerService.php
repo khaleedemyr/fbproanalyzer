@@ -55,7 +55,13 @@ class AnalyticsTrackerService
         $yt = $this->syncYoutubeTracked($user);
         $warnings = array_merge($warnings, $yt['warnings']);
 
-        $snapshots = $this->snapshotToday($user);
+        $snapshots = 0;
+        try {
+            $snapshots = $this->snapshotToday($user);
+        } catch (\Throwable $e) {
+            $warnings[] = 'Snapshot: '.$e->getMessage();
+            Log::warning('Analytics snapshot: '.$e->getMessage());
+        }
 
         return [
             'meta_synced' => $metaSynced,
@@ -73,64 +79,81 @@ class AnalyticsTrackerService
             throw new \RuntimeException('Sync hanya untuk Page dengan access token.');
         }
 
-        $posts = $this->meta->pagePosts($metaAccount->meta_id, $metaAccount->access_token, 40);
+        $posts = $this->meta->pagePosts($metaAccount->meta_id, $metaAccount->access_token, 12);
         $synced = 0;
 
         foreach ($posts as $post) {
-            $likes = (int) data_get($post, 'likes.summary.total_count', 0);
-            $comments = (int) data_get($post, 'comments.summary.total_count', 0);
-            $shares = (int) data_get($post, 'shares.count', 0);
-            $insights = $this->meta->postInsights($post['id'], $metaAccount->access_token);
-
-            $reach = (int) ($insights['post_impressions_unique'] ?? 0);
-            $impressions = (int) ($insights['post_impressions'] ?? 0);
-            $views = (int) ($insights['post_video_views'] ?? $insights['post_video_views_organic'] ?? 0);
-            if ($views <= 0) {
-                $views = $impressions > 0 ? $impressions : max($reach, $likes + $comments + $shares);
+            try {
+                $synced += $this->upsertMetaPost($user, $metaAccount, $post) ? 1 : 0;
+            } catch (\Throwable $e) {
+                Log::warning('Analytics meta post skip '.$post['id'].': '.$e->getMessage());
             }
-            if ($reach <= 0) {
-                $reach = max(1, $likes + $comments + $shares);
-            }
-
-            [$avgWatch, $retention] = $this->deriveWatchMetrics($insights);
-
-            $format = $this->scorer->detectFormat($post['status_type'] ?? null, $post['message'] ?? null);
-            $topic = $this->scorer->detectTopicCluster($post['message'] ?? null);
-            $formula = $this->scorer->formulaKey($format, $topic);
-            $metrics = compact('reach', 'likes', 'comments', 'shares') + ['saves' => 0, 'views' => $views];
-
-            ContentPost::query()->updateOrCreate(
-                ['meta_post_id' => $post['id']],
-                [
-                    'user_id' => $user->id,
-                    'meta_account_id' => $metaAccount->id,
-                    'permalink' => $post['permalink_url'] ?? null,
-                    'format' => $format,
-                    'message' => $post['message'] ?? null,
-                    'media_url' => $post['full_picture'] ?? null,
-                    'published_at' => isset($post['created_time']) ? Carbon::parse($post['created_time']) : null,
-                    'reach' => $reach,
-                    'impressions' => $impressions,
-                    'views' => $views,
-                    'likes' => $likes,
-                    'comments' => $comments,
-                    'shares' => $shares,
-                    'avg_watch_seconds' => $avgWatch,
-                    'retention_rate' => $retention,
-                    'engagement_rate' => $this->scorer->engagementRate($metrics),
-                    'viral_score' => $this->scorer->score($metrics),
-                    'topic_cluster' => $topic,
-                    'formula_key' => $formula,
-                    'raw_insights' => $insights,
-                ]
-            );
-
-            $synced++;
         }
 
         $metaAccount->update(['last_synced_at' => now()]);
 
         return $synced;
+    }
+
+    /**
+     * @param  array<string, mixed>  $post
+     */
+    protected function upsertMetaPost(User $user, MetaAccount $metaAccount, array $post): bool
+    {
+        $likes = (int) data_get($post, 'likes.summary.total_count', 0);
+        $comments = (int) data_get($post, 'comments.summary.total_count', 0);
+        $shares = (int) data_get($post, 'shares.count', 0);
+
+        try {
+            $insights = $this->meta->postInsights($post['id'], $metaAccount->access_token);
+        } catch (\Throwable) {
+            $insights = [];
+        }
+
+        $reach = (int) ($insights['post_impressions_unique'] ?? 0);
+        $impressions = (int) ($insights['post_impressions'] ?? 0);
+        $views = (int) ($insights['post_video_views'] ?? $insights['post_video_views_organic'] ?? 0);
+        if ($views <= 0) {
+            $views = $impressions > 0 ? $impressions : max($reach, $likes + $comments + $shares);
+        }
+        if ($reach <= 0) {
+            $reach = max(1, $likes + $comments + $shares);
+        }
+
+        [$avgWatch, $retention] = $this->deriveWatchMetrics($insights);
+
+        $format = $this->scorer->detectFormat($post['status_type'] ?? null, $post['message'] ?? null);
+        $topic = $this->scorer->detectTopicCluster($post['message'] ?? null);
+        $formula = $this->scorer->formulaKey($format, $topic);
+        $metrics = compact('reach', 'likes', 'comments', 'shares') + ['saves' => 0, 'views' => $views];
+
+        ContentPost::query()->updateOrCreate(
+            ['meta_post_id' => $post['id']],
+            [
+                'user_id' => $user->id,
+                'meta_account_id' => $metaAccount->id,
+                'permalink' => $post['permalink_url'] ?? null,
+                'format' => $format,
+                'message' => $post['message'] ?? null,
+                'media_url' => $post['full_picture'] ?? null,
+                'published_at' => isset($post['created_time']) ? Carbon::parse($post['created_time']) : null,
+                'reach' => $reach,
+                'impressions' => $impressions,
+                'views' => $views,
+                'likes' => $likes,
+                'comments' => $comments,
+                'shares' => $shares,
+                'avg_watch_seconds' => $avgWatch,
+                'retention_rate' => $retention,
+                'engagement_rate' => $this->scorer->engagementRate($metrics),
+                'viral_score' => $this->scorer->score($metrics),
+                'topic_cluster' => $topic,
+                'formula_key' => $formula,
+                'raw_insights' => $insights,
+            ]
+        );
+
+        return true;
     }
 
     /**

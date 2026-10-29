@@ -86,14 +86,14 @@ class MetaGraphService
 
     public function pagePosts(string $pageId, string $pageToken, int $limit = 25): array
     {
-        $response = Http::get($this->graphUrl('/'.$pageId.'/posts'), [
+        $response = Http::timeout(40)->get($this->graphUrl('/'.$pageId.'/posts'), [
             'fields' => 'id,message,created_time,permalink_url,full_picture,status_type,shares,likes.summary(true),comments.summary(true)',
             'limit' => $limit,
             'access_token' => $pageToken,
         ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException('Gagal mengambil postingan Page: '.$response->body());
+            throw new RuntimeException('Gagal mengambil postingan Page: '.(data_get($response->json(), 'error.message') ?: $response->body()));
         }
 
         return $response->json('data') ?? [];
@@ -101,18 +101,22 @@ class MetaGraphService
 
     public function postInsights(string $postId, string $pageToken): array
     {
+        // Start lean — full video metric sets often 400 and waste time across many posts.
         $metricSets = [
-            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views,post_video_views_organic,post_video_avg_time_watched,post_video_length,post_video_view_time',
-            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views,post_video_avg_time_watched',
             'post_impressions,post_impressions_unique,post_engaged_users,post_clicks',
+            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views,post_video_avg_time_watched',
         ];
 
         $metrics = [];
         foreach ($metricSets as $metric) {
-            $response = Http::timeout(30)->get($this->graphUrl('/'.$postId.'/insights'), [
-                'metric' => $metric,
-                'access_token' => $pageToken,
-            ]);
+            try {
+                $response = Http::timeout(12)->get($this->graphUrl('/'.$postId.'/insights'), [
+                    'metric' => $metric,
+                    'access_token' => $pageToken,
+                ]);
+            } catch (\Throwable) {
+                continue;
+            }
 
             if (! $response->successful()) {
                 continue;

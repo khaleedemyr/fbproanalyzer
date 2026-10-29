@@ -65,13 +65,19 @@ async function syncAll() {
     error.value = '';
     warnings.value = [];
     try {
-        const res = await http.post('/analytics/sync', { days: 30 });
-        data.value = res.data.data;
+        const res = await http.post('/analytics/sync', { days: 30 }, { timeout: 180000 });
+        if (res.data.data) data.value = res.data.data;
         const r = res.data.result || {};
         message.value = `${res.data.message} · Meta ${r.meta_synced || 0} post · YT ${r.youtube_synced || 0} · snapshot ${r.snapshots || 0}`;
         warnings.value = r.warnings || [];
+        if ((r.warnings || []).length && (r.meta_synced || 0) + (r.youtube_synced || 0) === 0) {
+            error.value = r.warnings[0];
+        }
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal sync analytics.';
+        const body = e.response?.data || {};
+        error.value = body.message || e.message || 'Gagal sync analytics.';
+        warnings.value = body.result?.warnings || [];
+        if (body.data) data.value = body.data;
     } finally {
         syncing.value = false;
     }

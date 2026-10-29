@@ -90,20 +90,38 @@ class YouTubeAnalyticsService
             ? 'channel=='.$account->channel_id
             : 'channel==MINE';
 
-        $response = Http::timeout(45)
-            ->withToken((string) $account->access_token)
-            ->get('https://youtubeanalytics.googleapis.com/v2/reports', [
-                'ids' => $ids,
-                'startDate' => $start,
-                'endDate' => $end,
-                'metrics' => 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,shares',
-                'dimensions' => 'video',
-                'sort' => '-views',
-                'maxResults' => 25,
-            ]);
+        $metricSets = [
+            'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments',
+            'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage',
+            'views,averageViewDuration,averageViewPercentage',
+            'views',
+        ];
 
-        if (! $response->successful()) {
-            throw new RuntimeException(data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status()));
+        $response = null;
+        $lastError = null;
+        foreach ($metricSets as $metrics) {
+            $response = Http::timeout(45)
+                ->withToken((string) $account->access_token)
+                ->get('https://youtubeanalytics.googleapis.com/v2/reports', [
+                    'ids' => $ids,
+                    'startDate' => $start,
+                    'endDate' => $end,
+                    'metrics' => $metrics,
+                    'dimensions' => 'video',
+                    'sort' => '-views',
+                    'maxResults' => 25,
+                ]);
+
+            if ($response->successful()) {
+                break;
+            }
+
+            $lastError = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
+            $response = null;
+        }
+
+        if ($response === null) {
+            throw new RuntimeException($lastError ?: 'YouTube Analytics report gagal.');
         }
 
         $headers = $response->json('columnHeaders') ?? [];

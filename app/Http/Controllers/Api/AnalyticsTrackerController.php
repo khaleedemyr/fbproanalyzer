@@ -21,12 +21,46 @@ class AnalyticsTrackerController extends Controller
 
     public function sync(Request $request, AnalyticsTrackerService $tracker): JsonResponse
     {
-        $result = $tracker->syncAll($request->user());
+        @set_time_limit(180);
+        $days = (int) $request->integer('days', 30);
+
+        try {
+            $result = $tracker->syncAll($request->user());
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Gagal sync analytics: '.$e->getMessage(),
+                'result' => [
+                    'meta_synced' => 0,
+                    'youtube_synced' => 0,
+                    'snapshots' => 0,
+                    'warnings' => [$e->getMessage()],
+                    'accounts' => 0,
+                ],
+                'data' => null,
+            ], 500);
+        }
+
+        try {
+            $dashboard = $tracker->dashboard($request->user(), $days);
+        } catch (\Throwable $e) {
+            report($e);
+            $dashboard = null;
+            $result['warnings'][] = 'Sync data ok, tapi dashboard gagal di-render: '.$e->getMessage();
+        }
+
+        $syncedSomething = (($result['meta_synced'] ?? 0) + ($result['youtube_synced'] ?? 0) + ($result['snapshots'] ?? 0)) > 0;
+        $warnings = $result['warnings'] ?? [];
 
         return response()->json([
-            'message' => 'Analytics sync selesai.',
+            'message' => $syncedSomething
+                ? 'Analytics sync selesai.'
+                : (! empty($warnings)
+                    ? 'Sync tidak menarik data baru — cek peringatan.'
+                    : 'Tidak ada data untuk di-sync.'),
             'result' => $result,
-            'data' => $tracker->dashboard($request->user(), (int) $request->integer('days', 30)),
+            'data' => $dashboard,
         ]);
     }
 
