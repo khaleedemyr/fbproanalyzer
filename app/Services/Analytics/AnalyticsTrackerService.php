@@ -14,7 +14,6 @@ use App\Services\YouTube\YouTubeAnalyticsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class AnalyticsTrackerService
 {
