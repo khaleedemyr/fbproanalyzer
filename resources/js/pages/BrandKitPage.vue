@@ -7,6 +7,9 @@ const saving = ref(false);
 const message = ref('');
 const error = ref('');
 const geminiConfigured = ref(false);
+const geminiModel = ref('');
+const geminiHint = ref('');
+const testing = ref(false);
 
 const form = reactive({
     name: '',
@@ -28,10 +31,30 @@ async function load() {
         const { data } = await http.get('/brand-kit');
         Object.assign(form, data.data);
         geminiConfigured.value = !!data.gemini_configured;
+        geminiModel.value = data.gemini_model || '';
+        geminiHint.value = data.gemini_key_hint || '';
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal memuat brand kit.';
     } finally {
         loading.value = false;
+    }
+}
+
+async function testGemini() {
+    testing.value = true;
+    message.value = '';
+    error.value = '';
+    try {
+        const { data } = await http.post('/brand-kit/test-gemini');
+        message.value = data.message;
+    } catch (e) {
+        const tried = e.response?.data?.tried;
+        const detail = Array.isArray(tried)
+            ? tried.map((t) => `${t.model}: ${t.error}`).join(' | ')
+            : '';
+        error.value = (e.response?.data?.message || 'Tes Gemini gagal.') + (detail ? ` — ${detail}` : '');
+    } finally {
+        testing.value = false;
     }
 }
 
@@ -66,11 +89,26 @@ onMounted(load);
             :class="geminiConfigured ? 'border-teal-100 bg-teal-50 text-teal-900' : 'border-amber-200 bg-amber-50 text-amber-950'"
         >
             <template v-if="geminiConfigured">
-                Gemini API aktif — blueprint lebih “nulis” seperti generate manualmu.
+                Gemini key terbaca (<code class="rounded bg-white/70 px-1">{{ geminiHint }}</code>) · model
+                <code class="rounded bg-white/70 px-1">{{ geminiModel }}</code>.
+                Kalau blueprint masih template, klik tes di bawah.
             </template>
             <template v-else>
-                Tanpa <code class="rounded bg-white/70 px-1">GEMINI_API_KEY</code> di `.env`, generator pakai template cinematic + karakter lock (tetap siap produksi). Opsional: isi key Gemini biar VO & angle lebih tajam.
+                <code class="rounded bg-white/70 px-1">GEMINI_API_KEY</code> belum kebaca. Isi di `.env` server:
+                <code class="rounded bg-white/70 px-1">GEMINI_MODEL=gemini-3.8-flash</code>
+                lalu <code class="rounded bg-white/70 px-1">php artisan config:clear</code>.
+                (Model lama <code class="rounded bg-white/70 px-1">gemini-2.0-flash</code> sudah mati sejak Juni 2026.)
             </template>
+            <div class="mt-3">
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 disabled:opacity-60"
+                    :disabled="testing"
+                    @click="testGemini"
+                >
+                    {{ testing ? 'Mengetes...' : 'Tes koneksi Gemini' }}
+                </button>
+            </div>
         </div>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>

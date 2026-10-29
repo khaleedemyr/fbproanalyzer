@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);
+    Route::post('brand-kit/test-gemini', [BrandKitController::class, 'testGemini']);
 
     Route::get('blueprints', [BlueprintController::class, 'index']);
     Route::post('blueprints/generate', [BlueprintController::class, 'generate']);

@@ -190,79 +190,95 @@ class BlueprintGeneratorService
         string $format,
         string $radarContext = '',
     ): ?array {
-        $apiKey = trim((string) config('blueprint.gemini_api_key', ''));
+        $apiKey = trim((string) config('blueprint.gemini_api_key', ''), " \t\n\r\0\x0B\"'");
         if ($apiKey === '') {
             $this->lastWarning = 'GEMINI_API_KEY belum terisi / belum kebaca config. Fallback template.';
 
             return null;
         }
 
-        $model = config('blueprint.gemini_model', 'gemini-2.0-flash');
         $prompt = $format === self::FORMAT_REELS_PANJANG
             ? $this->geminiLongPrompt($kit, $title, $topic, $idea, $radarContext)
             : $this->geminiShortPrompt($kit, $title, $topic, $idea, $radarContext);
 
-        try {
-            $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 120 : 60)
-                ->withHeaders(['Content-Type' => 'application/json'])
-                ->post(
-                    "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
-                    [
-                        'contents' => [[
-                            'parts' => [['text' => $prompt]],
-                        ]],
-                        'generationConfig' => [
-                            'temperature' => 0.85,
-                            'responseMimeType' => 'application/json',
-                        ],
-                    ]
-                );
+        $models = array_values(array_unique(array_filter([
+            (string) config('blueprint.gemini_model', 'gemini-3.8-flash'),
+            ...((array) config('blueprint.gemini_model_fallbacks', [])),
+        ])));
 
-            if (! $response->successful()) {
-                $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
-                $this->lastWarning = 'Gemini gagal: '.$err.' — pakai template.';
+        $errors = [];
 
-                return null;
+        foreach ($models as $model) {
+            try {
+                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 120 : 60)
+                    ->withHeaders(['Content-Type' => 'application/json'])
+                    ->post(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
+                        [
+                            'contents' => [[
+                                'parts' => [['text' => $prompt]],
+                            ]],
+                            'generationConfig' => [
+                                'temperature' => 0.85,
+                                'responseMimeType' => 'application/json',
+                            ],
+                        ]
+                    );
+
+                if (! $response->successful()) {
+                    $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
+                    $errors[] = "{$model}: {$err}";
+
+                    continue;
+                }
+
+                $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
+                if (! is_string($text) || $text === '') {
+                    $block = data_get($response->json(), 'candidates.0.finishReason')
+                        ?: data_get($response->json(), 'promptFeedback.blockReason');
+                    $errors[] = "{$model}: respons kosong".($block ? " ({$block})" : '');
+
+                    continue;
+                }
+
+                // Kadang model bungkus JSON di markdown fence.
+                $jsonText = trim($text);
+                if (preg_match('/```(?:json)?\s*([\s\S]*?)```/i', $jsonText, $m)) {
+                    $jsonText = trim($m[1]);
+                }
+
+                $decoded = json_decode($jsonText, true);
+                if (! is_array($decoded) || empty($decoded['scenes']) || ! is_array($decoded['scenes'])) {
+                    $errors[] = "{$model}: JSON blueprint tidak valid";
+
+                    continue;
+                }
+
+                return [
+                    'title' => (string) ($decoded['title'] ?? $title),
+                    'cover_theme' => (string) ($decoded['cover_theme'] ?? Str::upper($title)),
+                    'story_concept' => (string) ($decoded['story_concept'] ?? ''),
+                    'scenes' => array_values(array_map(fn ($s) => [
+                        'section' => (string) ($s['section'] ?? ''),
+                        'timecode' => (string) ($s['timecode'] ?? ''),
+                        'visual_type' => (string) ($s['visual_type'] ?? 'ai'),
+                        'vo' => (string) ($s['vo'] ?? ''),
+                        'on_screen' => (string) ($s['on_screen'] ?? ''),
+                        'image_prompt' => (string) ($s['image_prompt'] ?? ''),
+                        'motion_prompt' => (string) ($s['motion_prompt'] ?? ''),
+                    ], $decoded['scenes'])),
+                    'thumbnail_prompt' => (string) ($decoded['thumbnail_prompt'] ?? ''),
+                    'caption' => (string) ($decoded['caption'] ?? ''),
+                    'title_options' => array_values(array_map('strval', $decoded['title_options'] ?? [])),
+                ];
+            } catch (\Throwable $e) {
+                $errors[] = "{$model}: ".$e->getMessage();
             }
-
-            $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
-            if (! is_string($text) || $text === '') {
-                $block = data_get($response->json(), 'candidates.0.finishReason')
-                    ?: data_get($response->json(), 'promptFeedback.blockReason');
-                $this->lastWarning = 'Gemini kosong'.($block ? " ({$block})" : '').' — pakai template.';
-
-                return null;
-            }
-
-            $decoded = json_decode($text, true);
-            if (! is_array($decoded) || empty($decoded['scenes']) || ! is_array($decoded['scenes'])) {
-                $this->lastWarning = 'Respons Gemini bukan JSON blueprint valid — pakai template.';
-
-                return null;
-            }
-
-            return [
-                'title' => (string) ($decoded['title'] ?? $title),
-                'cover_theme' => (string) ($decoded['cover_theme'] ?? Str::upper($title)),
-                'story_concept' => (string) ($decoded['story_concept'] ?? ''),
-                'scenes' => array_values(array_map(fn ($s) => [
-                    'section' => (string) ($s['section'] ?? ''),
-                    'timecode' => (string) ($s['timecode'] ?? ''),
-                    'visual_type' => (string) ($s['visual_type'] ?? 'ai'),
-                    'vo' => (string) ($s['vo'] ?? ''),
-                    'on_screen' => (string) ($s['on_screen'] ?? ''),
-                    'image_prompt' => (string) ($s['image_prompt'] ?? ''),
-                    'motion_prompt' => (string) ($s['motion_prompt'] ?? ''),
-                ], $decoded['scenes'])),
-                'thumbnail_prompt' => (string) ($decoded['thumbnail_prompt'] ?? ''),
-                'caption' => (string) ($decoded['caption'] ?? ''),
-                'title_options' => array_values(array_map('strval', $decoded['title_options'] ?? [])),
-            ];
-        } catch (\Throwable $e) {
-            $this->lastWarning = 'Gemini error: '.$e->getMessage().' — pakai template.';
-
-            return null;
         }
+
+        $this->lastWarning = 'Gemini gagal ('.implode(' | ', $errors).') — pakai template.';
+
+        return null;
     }
 
     protected function geminiShortPrompt(
