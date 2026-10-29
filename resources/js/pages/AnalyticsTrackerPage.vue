@@ -4,11 +4,13 @@ import http from '../api/http';
 
 const loading = ref(true);
 const syncing = ref(false);
+const analyzing = ref(false);
 const connectingYt = ref(false);
 const message = ref('');
 const error = ref('');
 const warnings = ref([]);
 const data = ref(null);
+const ai = ref(null);
 const ytUrl = ref('');
 const ytTag = ref('');
 const addingYt = ref(false);
@@ -108,6 +110,21 @@ async function removeYt(id) {
     await load();
 }
 
+async function runAiAnalyze() {
+    analyzing.value = true;
+    error.value = '';
+    message.value = '';
+    try {
+        const res = await http.post('/analytics/ai-analyze', {}, { timeout: 120000 });
+        ai.value = res.data.data;
+        message.value = res.data.message || 'Analisa AI siap.';
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal analisa AI.';
+    } finally {
+        analyzing.value = false;
+    }
+}
+
 function formulaLabel(key) {
     if (!key) return '-';
     const [format, topic] = String(key).split('|');
@@ -137,14 +154,24 @@ onMounted(() => {
                     Tarik performa harian YouTube (views, retention, engagement) dari channel yang terhubung — deteksi formula yang lagi naik.
                 </p>
             </div>
-            <button
-                type="button"
-                class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                :disabled="syncing"
-                @click="syncAll"
-            >
-                {{ syncing ? 'Sync...' : 'Sync performa sekarang' }}
-            </button>
+            <div class="flex flex-wrap gap-2">
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 disabled:opacity-60"
+                    :disabled="analyzing || !youtube.length"
+                    @click="runAiAnalyze"
+                >
+                    {{ analyzing ? 'AI menganalisa...' : 'Analisa AI → jutaan views' }}
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    :disabled="syncing"
+                    @click="syncAll"
+                >
+                    {{ syncing ? 'Sync...' : 'Sync performa sekarang' }}
+                </button>
+            </div>
         </div>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>
@@ -155,6 +182,85 @@ onMounted(() => {
 
         <template v-else-if="data">
             <p class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">{{ data.insight }}</p>
+
+            <section v-if="ai" class="space-y-4 rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/80 to-white p-5">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                        <h3 class="font-semibold text-slate-900">Analisa AI — jalan ke jutaan views</h3>
+                        <p class="mt-1 text-xs text-slate-500">Engine: {{ ai.engine === 'gemini' ? 'Gemini' : 'template fallback' }}</p>
+                    </div>
+                    <button type="button" class="text-xs text-slate-500 underline" @click="runAiAnalyze" :disabled="analyzing">
+                        Generate ulang
+                    </button>
+                </div>
+
+                <p class="text-sm leading-relaxed text-slate-800">{{ ai.diagnosis }}</p>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-emerald-800">Yang sudah jalan</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                            <li v-for="(w, i) in ai.whats_working || []" :key="'w'+i">{{ w }}</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-rose-800">Yang menghambat</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                            <li v-for="(w, i) in ai.whats_blocking || []" :key="'b'+i">{{ w }}</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Playbook prioritas</p>
+                    <ol class="mt-3 space-y-3">
+                        <li
+                            v-for="step in ai.million_view_playbook || []"
+                            :key="step.priority + step.title"
+                            class="rounded-lg border border-slate-200 bg-white p-3"
+                        >
+                            <p class="text-sm font-semibold text-slate-900">
+                                <span class="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-teal-700 text-[11px] text-white">{{ step.priority }}</span>
+                                {{ step.title }}
+                            </p>
+                            <p class="mt-1 text-xs text-slate-500">{{ step.why }}</p>
+                            <p class="mt-2 text-sm text-slate-700">{{ step.how }}</p>
+                            <p v-if="step.example_title" class="mt-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-800">
+                                Contoh judul: <strong>{{ step.example_title }}</strong>
+                            </p>
+                            <p v-if="step.expected_lift" class="mt-1 text-[11px] text-teal-800">Impact: {{ step.expected_lift }}</p>
+                        </li>
+                    </ol>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">7 hari ke depan</p>
+                        <ol class="mt-2 list-decimal space-y-1 pl-4 text-sm text-slate-700">
+                            <li v-for="(d, i) in ai.next_7_days || []" :key="'d'+i">{{ d }}</li>
+                        </ol>
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Hindari</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+                            <li v-for="(a, i) in ai.avoid || []" :key="'a'+i">{{ a }}</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Hook / judul siap uji</p>
+                    <ul class="mt-2 space-y-1">
+                        <li
+                            v-for="(h, i) in ai.title_hooks || []"
+                            :key="'h'+i"
+                            class="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-800"
+                        >
+                            {{ h }}
+                        </li>
+                    </ul>
+                </div>
+            </section>
 
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="rounded-xl border border-slate-200 bg-white p-4">

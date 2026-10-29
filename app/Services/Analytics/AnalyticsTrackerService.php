@@ -3,6 +3,7 @@
 namespace App\Services\Analytics;
 
 use App\Models\AnalyticsSnapshot;
+use App\Models\BrandKit;
 use App\Models\ContentPost;
 use App\Models\MetaAccount;
 use App\Models\TrackedYoutubeVideo;
@@ -14,6 +15,7 @@ use App\Services\YouTube\YouTubeAnalyticsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class AnalyticsTrackerService
 {
@@ -348,7 +350,7 @@ class AnalyticsTrackerService
                 'youtube_tracked' => $yt->count(),
                 'total_views' => (int) $yt->sum('views'),
                 'total_shares' => 0,
-                'avg_retention' => round((float) $yt->avg('retention_rate'), 2),
+                'avg_retention' => round(min(100, (float) $yt->avg('retention_rate')), 2),
                 'avg_viral_score' => round((float) $scoredYt->avg('viral_score'), 2),
                 'delta_views_today' => (int) $todaySnaps->sum('delta_views'),
             ],
@@ -437,7 +439,7 @@ class AnalyticsTrackerService
                 'topic_cluster' => $topic,
                 'views' => (int) $v->views,
                 'likes' => (int) $v->likes,
-                'retention_rate' => (float) ($v->retention_rate ?? 0),
+                'retention_rate' => min(100, max(0, (float) ($v->retention_rate ?? 0))),
                 'viral_score' => $this->scorer->score($metrics),
                 'engagement_rate' => $this->scorer->engagementRate($metrics),
             ];
@@ -455,7 +457,7 @@ class AnalyticsTrackerService
                     'posts' => $group->count(),
                     'avg_viral_score' => round((float) $group->avg('viral_score'), 2),
                     'avg_engagement' => round((float) $group->avg('engagement_rate'), 2),
-                    'avg_retention' => round((float) $group->avg('retention_rate'), 2),
+                    'avg_retention' => round(min(100, (float) $group->avg('retention_rate')), 2),
                     'total_views' => (int) $group->sum('views'),
                     'total_shares' => 0,
                     'share_rate' => 0,
@@ -485,6 +487,305 @@ class AnalyticsTrackerService
         $this->syncYoutubeTracked($user);
 
         return $row->fresh();
+    }
+
+    /**
+     * AI playbook: how to push this channel toward millions of views.
+     *
+     * @return array{engine:string,diagnosis:string,whats_working:array<int,string>,whats_blocking:array<int,string>,million_view_playbook:array<int,array<string,mixed>>,next_7_days:array<int,string>,title_hooks:array<int,string>,avoid:array<int,string>}
+     */
+    public function aiViralAnalysis(User $user): array
+    {
+        $dashboard = $this->dashboard($user, 30);
+        $videos = collect($dashboard['youtube'] ?? []);
+        if ($videos->isEmpty()) {
+            throw new \RuntimeException('Belum ada video YouTube. Hubungkan channel / sync dulu.');
+        }
+
+        $kit = BrandKit::query()->where('user_id', $user->id)->orderByDesc('id')->first()
+            ?: BrandKit::defaultFor($user);
+
+        $top = $videos->sortByDesc('views')->take(8)->values();
+        $highRet = $videos->filter(fn ($v) => (float) ($v['retention_rate'] ?? 0) > 0)
+            ->sortByDesc('retention_rate')
+            ->take(5)
+            ->values();
+        $low = $videos->sortBy('views')->take(5)->values();
+
+        $fmtVideo = function ($v) {
+            return sprintf(
+                '- "%s" | views %s | likes %s | comments %s | retention %s%% | avg watch %ss | tag %s',
+                Str::limit((string) ($v['title'] ?? $v['video_id']), 90, ''),
+                number_format((int) ($v['views'] ?? 0)),
+                number_format((int) ($v['likes'] ?? 0)),
+                number_format((int) ($v['comments'] ?? 0)),
+                round(min(100, (float) ($v['retention_rate'] ?? 0)), 1),
+                round((float) ($v['avg_watch_seconds'] ?? 0), 1),
+                $v['formula_tag'] ?: '-'
+            );
+        };
+
+        $formulaBlock = collect($dashboard['winning_formulas'] ?? [])
+            ->take(8)
+            ->map(function ($f) {
+                return sprintf(
+                    '- %s × %s | videos %d | viral %.1f | views %s | retention %.1f%% | trend %s (Δ %s)',
+                    strtoupper((string) ($f['format'] ?? 'video')),
+                    $f['topic_cluster'] ?? 'umum',
+                    (int) ($f['posts'] ?? 0),
+                    (float) ($f['avg_viral_score'] ?? 0),
+                    number_format((int) ($f['total_views'] ?? 0)),
+                    min(100, (float) ($f['avg_retention'] ?? 0)),
+                    $f['trend'] ?? 'stabil',
+                    $f['score_delta'] ?? 0
+                );
+            })
+            ->implode("\n");
+
+        $summary = $dashboard['summary'] ?? [];
+        $channel = data_get($dashboard, 'youtube_oauth.channel_title') ?: 'channel YouTube';
+        $niche = trim((string) ($kit->niche ?: 'psikologi gelap / self-awareness'));
+        $brand = trim((string) ($kit->name ?: 'Kea Abbasy'));
+        $character = trim((string) ($kit->character_name ?: 'Kea'));
+
+        $prompt = <<<PROMPT
+Kamu strategist pertumbuhan YouTube (Shorts + long-form) untuk brand {$brand} niche {$niche}, karakter {$character}.
+Channel: {$channel}
+Target: tembus JUTAAN views (bukan tips generik).
+
+DATA REAL CHANNEL:
+Total views tracked: {$summary['total_views']}
+Video tracked: {$summary['youtube_tracked']}
+Avg retention: {$summary['avg_retention']}%
+Avg viral score: {$summary['avg_viral_score']}
+Insight sistem: {$dashboard['insight']}
+
+FORMULA (format × topik):
+{$formulaBlock}
+
+TOP VIEWS:
+{$top->map($fmtVideo)->implode("\n")}
+
+RETENTION TERTINGGI:
+{$highRet->map($fmtVideo)->implode("\n")}
+
+VIEWS RENDAH (pelajaran gagal):
+{$low->map($fmtVideo)->implode("\n")}
+
+Tugas: analisa data di atas lalu buat playbook konkret biar channel ini naik ke skala jutaan views.
+Fokus niche psikologi Indonesia (emosi, trauma, toxic, attachment, overthinking) — jangan saran umum "posting konsisten".
+
+Keluarkan JSON SAJA:
+{
+  "diagnosis": "3-5 kalimat diagnosis tajam: kenapa channel masih di skala ini + apa sinyal viral yang sudah ada",
+  "whats_working": ["pola yang sudah jalan di data, max 5"],
+  "whats_blocking": ["penghambat tembus jutaan dari data, max 5"],
+  "million_view_playbook": [
+    {
+      "priority": 1,
+      "title": "aksi prioritas pendek",
+      "why": "kenapa ini yang paling impact dari data",
+      "how": "langkah eksekusi 2-4 kalimat sangat konkret",
+      "example_title": "contoh judul YouTube siap pakai",
+      "expected_lift": "perkiraan dampak (views / retention / share)"
+    }
+  ],
+  "next_7_days": ["checklist hari 1-7, max 7 item"],
+  "title_hooks": ["8-10 judul/hook siap uji A/B untuk niche ini"],
+  "avoid": ["hal yang harus dihentikan berdasarkan data lemah, max 5"]
+}
+
+WAJIB 5 item di million_view_playbook, urut priority 1 = paling penting.
+Bahasa Indonesia, langsung, tanpa basa-basi motivational.
+PROMPT;
+
+        $ai = $this->callGeminiViralJson($prompt);
+        if ($ai !== null) {
+            return $ai + ['engine' => 'gemini'];
+        }
+
+        return $this->fallbackViralAnalysis($dashboard, $top, $highRet) + ['engine' => 'template'];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function callGeminiViralJson(string $prompt): ?array
+    {
+        $apiKey = trim((string) config('blueprint.gemini_api_key', ''), " \t\n\r\0\x0B\"'");
+        if ($apiKey === '') {
+            return null;
+        }
+
+        $models = array_values(array_unique(array_filter([
+            (string) config('blueprint.gemini_model', 'gemini-3.8-flash'),
+            ...((array) config('blueprint.gemini_model_fallbacks', [])),
+        ])));
+
+        foreach ($models as $model) {
+            try {
+                $response = Http::timeout(90)
+                    ->withHeaders(['Content-Type' => 'application/json'])
+                    ->post(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
+                        [
+                            'contents' => [['parts' => [['text' => $prompt]]]],
+                            'generationConfig' => [
+                                'temperature' => 0.7,
+                                'responseMimeType' => 'application/json',
+                            ],
+                        ]
+                    );
+
+                if (! $response->successful()) {
+                    Log::warning("Analytics AI Gemini {$model}: HTTP ".$response->status());
+                    continue;
+                }
+
+                $text = (string) data_get($response->json(), 'candidates.0.content.parts.0.text', '');
+                if ($text === '') {
+                    continue;
+                }
+                if (preg_match('/```(?:json)?\s*([\s\S]*?)```/i', $text, $m)) {
+                    $text = trim($m[1]);
+                }
+
+                $decoded = json_decode($text, true);
+                if (! is_array($decoded) || blank($decoded['diagnosis'] ?? null)) {
+                    continue;
+                }
+
+                $playbook = [];
+                foreach ($decoded['million_view_playbook'] ?? [] as $i => $row) {
+                    if (! is_array($row)) {
+                        continue;
+                    }
+                    $playbook[] = [
+                        'priority' => (int) ($row['priority'] ?? ($i + 1)),
+                        'title' => Str::limit(trim((string) ($row['title'] ?? '')), 120, ''),
+                        'why' => trim((string) ($row['why'] ?? '')),
+                        'how' => trim((string) ($row['how'] ?? '')),
+                        'example_title' => trim((string) ($row['example_title'] ?? '')),
+                        'expected_lift' => trim((string) ($row['expected_lift'] ?? '')),
+                    ];
+                }
+                $playbook = array_values(array_filter($playbook, fn ($p) => $p['title'] !== ''));
+                if ($playbook === []) {
+                    continue;
+                }
+
+                $strList = fn ($key, int $max) => array_values(array_slice(array_filter(array_map(
+                    fn ($x) => is_string($x) ? trim($x) : '',
+                    $decoded[$key] ?? []
+                )), 0, $max));
+
+                return [
+                    'diagnosis' => trim((string) $decoded['diagnosis']),
+                    'whats_working' => $strList('whats_working', 5),
+                    'whats_blocking' => $strList('whats_blocking', 5),
+                    'million_view_playbook' => array_slice($playbook, 0, 5),
+                    'next_7_days' => $strList('next_7_days', 7),
+                    'title_hooks' => $strList('title_hooks', 10),
+                    'avoid' => $strList('avoid', 5),
+                ];
+            } catch (\Throwable $e) {
+                Log::warning("Analytics AI Gemini {$model}: ".$e->getMessage());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $dashboard
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $top
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $highRet
+     * @return array<string, mixed>
+     */
+    protected function fallbackViralAnalysis(array $dashboard, $top, $highRet): array
+    {
+        $bestFormula = $dashboard['winning_formulas'][0] ?? null;
+        $bestLabel = $bestFormula
+            ? strtoupper((string) ($bestFormula['format'] ?? 'video')).' × '.($bestFormula['topic_cluster'] ?? 'umum')
+            : 'VIDEO × emotion';
+        $topTitle = $top->first()['title'] ?? 'video terbaikmu';
+        $retTitle = $highRet->first()['title'] ?? $topTitle;
+
+        return [
+            'diagnosis' => 'Data channel menunjukkan skala masih ribuan–puluhan ribu views. Sinyal positif ada di retention dan formula '.$bestLabel.', tapi volume outbound (judul/hook/packaging) belum cukup agresif untuk tembus jutaan. Double-down pada pola yang sudah menang, potong topik “umum” yang tidak emosional.',
+            'whats_working' => array_values(array_filter([
+                'Formula terkuat saat ini: '.$bestLabel,
+                'Video tinggi views: '.$topTitle,
+                'Retention kuat di: '.$retTitle,
+            ])),
+            'whats_blocking' => [
+                'Terlalu banyak judul generik / topik “umum” yang tidak memicu identitas penonton.',
+                'Belum ada serialisasi sudut emosional yang diulang sampai algoritma mengunci audiens.',
+                'Hook 3 detik pertama dan packaging thumbnail/title belum diuji A/B secara sistematis.',
+            ],
+            'million_view_playbook' => [
+                [
+                    'priority' => 1,
+                    'title' => 'Dobelkan formula retention tertinggi',
+                    'why' => 'Retention tinggi = sinyal kuat ke algoritma Shorts/YouTube.',
+                    'how' => 'Ambil 5 judul dari video retention tertinggi, tulis ulang sudutnya jadi 10 versi baru. Publish 1/hari selama 10 hari.',
+                    'example_title' => 'Kalau kamu selalu merasa bersalah setelah bilang “tidak”, ini penyebabnya',
+                    'expected_lift' => 'Naikkan avg retention & push ke rekomendasi mirip',
+                ],
+                [
+                    'priority' => 2,
+                    'title' => 'Ganti “umum” jadi emosi spesifik',
+                    'why' => 'Cluster umum punya volume tapi daya tembak viral lebih lemah.',
+                    'how' => 'Setiap naskah harus menyentuh 1 luka: anxiety, toxic parents, attachment, overthinking, gaslight.',
+                    'example_title' => 'Overthinkingmu bukan kepintaran — itu trauma yang belum selesai',
+                    'expected_lift' => 'CTR + share intent naik',
+                ],
+                [
+                    'priority' => 3,
+                    'title' => 'Hook konfrontatif di 2 detik pertama',
+                    'why' => 'Tanpa hook tajam, retention bagus pun jarang scale ke jutaan.',
+                    'how' => 'Mulai dengan tuduhan/identitas: “Kamu bukan terlalu sensitif…” lalu baru penjelasan.',
+                    'example_title' => 'Kamu bukan drama — kamu baru sadar batasmu dilanggar',
+                    'expected_lift' => 'Swipe-away turun di detik awal',
+                ],
+                [
+                    'priority' => 4,
+                    'title' => 'Bikin 1 serial 7 episode',
+                    'why' => 'Serial menaikkan returning viewers & session time.',
+                    'how' => 'Pilih 1 luka (mis. toxic relationship) → 7 sudut: tanda, pola, gaslight, keluar, guilt, relapse, healing.',
+                    'example_title' => 'Episode 3: kenapa kamu selalu balik ke orang yang menyakitimu',
+                    'expected_lift' => 'Compounding views antar episode',
+                ],
+                [
+                    'priority' => 5,
+                    'title' => 'Publish cadence 1–2 Shorts/hari',
+                    'why' => 'Dengan data 25 video, frekuensi uji masih kurang untuk temukan outlier jutaan.',
+                    'how' => 'Batch tulis 14 naskah seminggu, upload konsisten slot yang biasanya naik di analytics.',
+                    'example_title' => '(pakai title_hooks di bawah)',
+                    'expected_lift' => 'Lebih banyak “lottery ticket” viral',
+                ],
+            ],
+            'next_7_days' => [
+                'Hari 1: list 10 judul dari pola retention tertinggi',
+                'Hari 2–3: tulis 7 naskah serial 1 topik emosional',
+                'Hari 4–7: publish 1 Short/hari + catat retention 24 jam',
+            ],
+            'title_hooks' => [
+                'Kalau kamu takut kecewain orang, ini yang sebenarnya kamu takuti',
+                'Dia bukan sibuk — dia memilih tidak memprioritaskanmu',
+                'Overthinking muncul saat kamu tidak merasa aman',
+                'Kamu terus explain karena dulu penjelasanmu tidak pernah cukup',
+                'Bukan kamu yang “terlalu banyak merasa” — kamu hanya tidak dibolehkan punya perasaan',
+                'Tanda kamu trauma-bonded, bukan jatuh cinta',
+                'Kenapa orang toxic selalu bilang kamu yang berlebihan',
+                'Kalau kamu capek jadi “yang mengerti”, dengarkan ini',
+            ],
+            'avoid' => [
+                'Judul edukatif datar tanpa luka emosional',
+                'Konten “tips umum” tanpa sudut kontroversial',
+                'Mengulang format yang views-nya sudah jelas lemah',
+            ],
+        ];
     }
 
     /**

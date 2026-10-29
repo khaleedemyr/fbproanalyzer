@@ -61,7 +61,7 @@ class YouTubeAnalyticsService
                     'likes' => (int) ($row['likes'] ?? 0),
                     'comments' => (int) ($row['comments'] ?? 0),
                     'avg_watch_seconds' => (float) ($row['averageViewDuration'] ?? 0),
-                    'retention_rate' => round((float) ($row['averageViewPercentage'] ?? 0), 2),
+                    'retention_rate' => round(min(100, max(0, (float) ($row['averageViewPercentage'] ?? 0))), 2),
                     'estimated_minutes_watched' => (int) round((float) ($row['estimatedMinutesWatched'] ?? 0)),
                     'last_synced_at' => now(),
                     'raw' => $row,

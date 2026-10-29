@@ -64,6 +64,28 @@ class AnalyticsTrackerController extends Controller
         ]);
     }
 
+    public function aiAnalyze(Request $request, AnalyticsTrackerService $tracker): JsonResponse
+    {
+        @set_time_limit(120);
+
+        try {
+            $analysis = $tracker->aiViralAnalysis($request->user());
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json(['message' => 'Gagal analisa AI: '.$e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'message' => ($analysis['engine'] ?? '') === 'gemini'
+                ? 'Analisa AI (Gemini) siap.'
+                : 'Analisa template siap (Gemini tidak tersedia — cek GEMINI_API_KEY).',
+            'data' => $analysis,
+        ]);
+    }
+
     public function trackYoutube(Request $request, AnalyticsTrackerService $tracker): JsonResponse
     {
         $data = $request->validate([
