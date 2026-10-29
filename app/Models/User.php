@@ -70,4 +70,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(TrackedYoutubeVideo::class);
     }
+
+    public function youtubeAccounts(): HasMany
+    {
+        return $this->hasMany(YoutubeAccount::class);
+    }
 }

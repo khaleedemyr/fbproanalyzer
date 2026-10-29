@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AnalyticsTrackerController;
 use App\Http\Controllers\Api\AngleFinderController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\YouTubeAuthController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\BrandKitController;
 use App\Http\Controllers\Api\ContentIdeaController;
@@ -60,6 +61,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('analytics/sync', [AnalyticsTrackerController::class, 'sync']);
     Route::post('analytics/youtube', [AnalyticsTrackerController::class, 'trackYoutube']);
     Route::delete('analytics/youtube/{trackedYoutubeVideo}', [AnalyticsTrackerController::class, 'destroyYoutube']);
+
+    Route::get('youtube/status', [YouTubeAuthController::class, 'status']);
+    Route::get('youtube/redirect', [YouTubeAuthController::class, 'redirect']);
+    Route::delete('youtube/disconnect', [YouTubeAuthController::class, 'disconnect']);
 
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);

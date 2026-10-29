@@ -7,8 +7,10 @@ use App\Models\ContentPost;
 use App\Models\MetaAccount;
 use App\Models\TrackedYoutubeVideo;
 use App\Models\User;
+use App\Models\YoutubeAccount;
 use App\Services\MetaGraphService;
 use App\Services\ViralScoreService;
+use App\Services\YouTube\YouTubeAnalyticsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +21,7 @@ class AnalyticsTrackerService
     public function __construct(
         private MetaGraphService $meta,
         private ViralScoreService $scorer,
+        private YouTubeAnalyticsService $youtubeAnalytics,
     ) {
     }
 
@@ -46,6 +49,9 @@ class AnalyticsTrackerService
             $warnings[] = 'Belum ada Meta Page dengan token. Hubungkan akun di menu Akun Meta, lalu Sync Insights.';
         }
 
+        $ytOauth = $this->youtubeAnalytics->syncUser($user);
+        $warnings = array_merge($warnings, $ytOauth['warnings']);
+
         $yt = $this->syncYoutubeTracked($user);
         $warnings = array_merge($warnings, $yt['warnings']);
 
@@ -53,7 +59,8 @@ class AnalyticsTrackerService
 
         return [
             'meta_synced' => $metaSynced,
-            'youtube_synced' => $yt['synced'],
+            'youtube_synced' => $ytOauth['synced'] + $yt['synced'],
+            'youtube_analytics_synced' => $ytOauth['synced'],
             'snapshots' => $snapshots,
             'warnings' => $warnings,
             'accounts' => $accounts,
@@ -264,8 +271,8 @@ class AnalyticsTrackerService
                     'comments' => (int) $yt->comments,
                     'shares' => 0,
                     'saves' => 0,
-                    'avg_watch_seconds' => 0,
-                    'retention_rate' => 0,
+                    'avg_watch_seconds' => (float) ($yt->avg_watch_seconds ?? 0),
+                    'retention_rate' => (float) ($yt->retention_rate ?? 0),
                     'engagement_rate' => $this->scorer->engagementRate($metrics),
                     'viral_score' => $this->scorer->score($metrics),
                     'delta_views' => (int) $yt->views - (int) ($prev->views ?? 0),
@@ -273,7 +280,11 @@ class AnalyticsTrackerService
                     'format' => $yt->format ?: 'video',
                     'topic_cluster' => $yt->formula_tag,
                     'formula_key' => $formula,
-                    'raw' => ['title' => $yt->title, 'url' => $yt->url],
+                    'raw' => [
+                        'title' => $yt->title,
+                        'url' => $yt->url,
+                        'estimated_minutes_watched' => $yt->estimated_minutes_watched ?? 0,
+                    ],
                 ]
             );
             $count++;
@@ -389,12 +400,37 @@ class AnalyticsTrackerService
                 'views' => (int) $v->views,
                 'likes' => (int) $v->likes,
                 'comments' => (int) $v->comments,
+                'avg_watch_seconds' => (float) ($v->avg_watch_seconds ?? 0),
+                'retention_rate' => (float) ($v->retention_rate ?? 0),
+                'estimated_minutes_watched' => (int) ($v->estimated_minutes_watched ?? 0),
                 'formula_tag' => $v->formula_tag,
                 'last_synced_at' => optional($v->last_synced_at)?->toDateTimeString(),
             ]),
             'insight' => $this->buildInsight($winning),
             'youtube_configured' => filled(config('radar.youtube_api_key')),
+            'youtube_oauth_configured' => filled(config('youtube.client_id')) && filled(config('youtube.client_secret')),
+            'youtube_oauth' => $this->youtubeOauthSummary($user),
             'meta_pages' => $user->metaAccounts()->where('type', 'page')->count(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function youtubeOauthSummary(User $user): ?array
+    {
+        $account = YoutubeAccount::query()->where('user_id', $user->id)->orderByDesc('id')->first();
+        if (! $account) {
+            return null;
+        }
+
+        return [
+            'id' => $account->id,
+            'channel_id' => $account->channel_id,
+            'channel_title' => $account->channel_title,
+            'email' => $account->email,
+            'picture_url' => $account->picture_url,
+            'last_synced_at' => optional($account->last_synced_at)?->toDateTimeString(),
         ];
     }
 

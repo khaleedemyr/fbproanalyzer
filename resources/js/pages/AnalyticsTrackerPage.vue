@@ -4,6 +4,7 @@ import http from '../api/http';
 
 const loading = ref(true);
 const syncing = ref(false);
+const connectingYt = ref(false);
 const message = ref('');
 const error = ref('');
 const warnings = ref([]);
@@ -18,6 +19,7 @@ const trend = computed(() => data.value?.daily_trend || []);
 const movers = computed(() => data.value?.movers || []);
 const topMeta = computed(() => data.value?.top_meta || []);
 const youtube = computed(() => data.value?.youtube || []);
+const ytOauth = computed(() => data.value?.youtube_oauth || null);
 const maxTrendViews = computed(() => Math.max(1, ...trend.value.map((r) => Number(r.views || 0))));
 
 async function load() {
@@ -31,6 +33,30 @@ async function load() {
     } finally {
         loading.value = false;
     }
+}
+
+async function connectYoutube() {
+    connectingYt.value = true;
+    error.value = '';
+    try {
+        const { data: res } = await http.get('/youtube/redirect');
+        if (res.url) {
+            window.location.href = res.url;
+            return;
+        }
+        error.value = 'URL OAuth YouTube kosong.';
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal mulai OAuth YouTube.';
+    } finally {
+        connectingYt.value = false;
+    }
+}
+
+async function disconnectYoutube() {
+    if (!confirm('Putuskan koneksi YouTube Analytics?')) return;
+    await http.delete('/youtube/disconnect');
+    message.value = 'YouTube OAuth diputus.';
+    await load();
 }
 
 async function syncAll() {
@@ -83,7 +109,18 @@ function formulaLabel(key) {
     return `${(format || 'post').toUpperCase()} × ${topic || 'umum'}`;
 }
 
-onMounted(load);
+onMounted(() => {
+    const params = new URLSearchParams(window.location.search);
+    const yt = params.get('youtube');
+    if (yt === 'connected') message.value = 'YouTube Analytics terhubung.';
+    if (yt === 'error' || yt === 'token_failed' || yt === 'invalid_state') {
+        error.value = params.get('msg') || `OAuth YouTube gagal (${yt}).`;
+    }
+    if (yt) {
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+    load();
+});
 </script>
 
 <template>
@@ -240,9 +277,45 @@ onMounted(load);
             </div>
 
             <section class="rounded-xl border border-slate-200 bg-white p-5">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h3 class="font-semibold text-slate-900">YouTube Analytics (OAuth)</h3>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Hubungkan channel sendiri untuk retention (averageViewPercentage) + avg watch duration.
+                            <span v-if="!data.youtube_oauth_configured" class="text-amber-700"> Isi YOUTUBE_CLIENT_ID / SECRET di .env dulu.</span>
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            v-if="!ytOauth"
+                            type="button"
+                            class="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                            :disabled="connectingYt || !data.youtube_oauth_configured"
+                            @click="connectYoutube"
+                        >
+                            {{ connectingYt ? 'Menghubungkan...' : 'Hubungkan YouTube' }}
+                        </button>
+                        <button
+                            v-else
+                            type="button"
+                            class="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            @click="disconnectYoutube"
+                        >
+                            Putuskan
+                        </button>
+                    </div>
+                </div>
+                <div v-if="ytOauth" class="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    Terhubung: <strong>{{ ytOauth.channel_title || ytOauth.channel_id }}</strong>
+                    <span v-if="ytOauth.email" class="text-slate-500"> · {{ ytOauth.email }}</span>
+                    <span v-if="ytOauth.last_synced_at" class="block text-xs text-slate-500">Last sync {{ ytOauth.last_synced_at }}</span>
+                </div>
+            </section>
+
+            <section class="rounded-xl border border-slate-200 bg-white p-5">
                 <h3 class="font-semibold text-slate-900">Track video YouTube</h3>
                 <p class="mt-1 text-xs text-slate-500">
-                    Via YouTube Data API (views/likes/comments publik). Retention detail butuh YouTube Analytics OAuth — belum dihubungkan.
+                    Manual track (Data API) atau otomatis dari OAuth Analytics. Retention muncul setelah OAuth sync.
                     <span v-if="!data.youtube_configured" class="text-amber-700"> YOUTUBE_API_KEY belum terbaca.</span>
                 </p>
                 <form class="mt-3 flex flex-wrap gap-2" @submit.prevent="addYoutube">
@@ -257,7 +330,10 @@ onMounted(load);
                         <div>
                             <a :href="v.url" target="_blank" class="text-sm font-medium text-slate-900 hover:underline">{{ v.title || v.video_id }}</a>
                             <p class="text-xs text-slate-500">
-                                views {{ Number(v.views).toLocaleString('id-ID') }} · likes {{ v.likes }} · {{ v.formula_tag || '-' }}
+                                views {{ Number(v.views).toLocaleString('id-ID') }} · likes {{ v.likes }}
+                                <span v-if="v.retention_rate"> · ret {{ v.retention_rate }}%</span>
+                                <span v-if="v.avg_watch_seconds"> · avg watch {{ v.avg_watch_seconds }}s</span>
+                                · {{ v.formula_tag || '-' }}
                             </p>
                         </div>
                         <button type="button" class="text-xs text-red-600" @click="removeYt(v.id)">Hapus</button>

@@ -18,6 +18,9 @@ class TrackedYoutubeVideo extends Model
         'views',
         'likes',
         'comments',
+        'avg_watch_seconds',
+        'retention_rate',
+        'estimated_minutes_watched',
         'published_at',
         'last_synced_at',
         'raw',
@@ -28,6 +31,8 @@ class TrackedYoutubeVideo extends Model
         return [
             'published_at' => 'datetime',
             'last_synced_at' => 'datetime',
+            'avg_watch_seconds' => 'decimal:2',
+            'retention_rate' => 'decimal:2',
             'raw' => 'array',
         ];
     }
