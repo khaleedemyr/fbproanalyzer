@@ -25,6 +25,11 @@ const routes = [
                 component: () => import('../pages/DashboardPage.vue'),
             },
             {
+                path: 'radar',
+                name: 'radar',
+                component: () => import('../pages/RadarPage.vue'),
+            },
+            {
                 path: 'posts',
                 name: 'posts',
                 component: () => import('../pages/PostsPage.vue'),

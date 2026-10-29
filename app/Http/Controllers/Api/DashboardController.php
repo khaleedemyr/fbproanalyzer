@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ContentIdea;
+use App\Models\TrendSignal;
 use App\Models\WatchlistPost;
 use App\Services\ViralScoreService;
 use Illuminate\Http\JsonResponse;
@@ -69,15 +70,26 @@ class DashboardController extends Controller
             ->limit(8)
             ->get();
 
+        $autoSignals = TrendSignal::query()
+            ->where('niche', config('radar.niche', 'psikologi'))
+            ->orderByDesc('viral_score')
+            ->limit(10)
+            ->get();
+
         return response()->json([
-            'focus' => 'viral_niche_radar',
+            'focus' => 'auto_viral_radar',
             'niche' => 'psikologi',
             'stats' => [
+                'auto_signals' => TrendSignal::query()->where('niche', 'psikologi')->count(),
                 'creators' => $user->watchlistAccounts()->count(),
                 'viral_posts' => WatchlistPost::query()->where('user_id', $user->id)->count(),
                 'ideas' => $user->contentIdeas()->where('status', 'queued')->count(),
-                'avg_viral_score' => round((float) WatchlistPost::query()->where('user_id', $user->id)->avg('estimated_score'), 2),
+                'avg_viral_score' => round((float) (
+                    $autoSignals->avg('viral_score')
+                    ?: WatchlistPost::query()->where('user_id', $user->id)->avg('estimated_score')
+                ), 2),
             ],
+            'auto_signals' => $autoSignals,
             'viral_board' => $viralPosts,
             'format_stats' => $formatStats,
             'topic_stats' => $topicStats,
@@ -89,10 +101,12 @@ class DashboardController extends Controller
                 ->limit(6)
                 ->get(),
             'next_actions' => [
-                'Tambah 10–15 creator psikologi ke Watchlist',
-                'Setiap hari catat 3–5 post yang lagi panas (like/komen/share)',
-                'Generate ide dari pola viral sebelum produksi',
+                'Klik “Jalankan Auto Radar” untuk deteksi topik viral otomatis',
+                'Isi YOUTUBE_API_KEY di .env agar sinyal video makin tajam (opsional)',
+                'Pilih ide antrian lalu produksi konten FB',
             ],
+            'youtube_configured' => filled(config('radar.youtube_api_key')),
         ]);
     }
 }
+

@@ -6,10 +6,10 @@ const auth = useAuthStore();
 const router = useRouter();
 
 const links = [
-    { to: '/', label: 'Viral Radar', name: 'dashboard' },
-    { to: '/watchlist', label: 'Watchlist', name: 'watchlist' },
-    { to: '/posts', label: 'Papan Viral', name: 'posts' },
+    { to: '/', label: 'Dashboard', name: 'dashboard' },
+    { to: '/radar', label: 'Auto Radar', name: 'radar' },
     { to: '/ideas', label: 'Ide Konten', name: 'ideas' },
+    { to: '/watchlist', label: 'Watchlist', name: 'watchlist' },
     { to: '/accounts', label: 'Akun Meta', name: 'accounts' },
 ];
 

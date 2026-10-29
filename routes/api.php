@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ContentPostController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\MetaAccountController;
 use App\Http\Controllers\Api\MetaAuthController;
+use App\Http\Controllers\Api\RadarController;
 use App\Http\Controllers\Api\WatchlistController;
 use Illuminate\Support\Facades\Route;
 
@@ -20,6 +21,9 @@ Route::prefix('auth')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('dashboard/summary', [DashboardController::class, 'summary']);
+
+    Route::get('radar', [RadarController::class, 'index']);
+    Route::post('radar/sync', [RadarController::class, 'sync']);
 
     Route::get('meta/redirect', [MetaAuthController::class, 'redirect']);
     Route::get('meta/accounts', [MetaAccountController::class, 'index']);
