@@ -306,12 +306,13 @@ class BlueprintGeneratorService
                             'contents' => [[
                                 'parts' => [['text' => $prompt]],
                             ]],
-                            'generationConfig' => [
-                                'temperature' => 0.85,
-                                'responseMimeType' => 'application/json',
-                            ],
-                        ]
-                    );
+                        'generationConfig' => [
+                            'temperature' => 0.95,
+                            'topP' => 0.95,
+                            'responseMimeType' => 'application/json',
+                        ],
+                    ]
+                );
 
                 if (! $response->successful()) {
                     $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
@@ -384,36 +385,48 @@ class BlueprintGeneratorService
         $dur = $this->durationSeconds;
         $beat = $this->beatSeconds;
 
+        $banned = $this->bannedHookPhrasesForPrompt();
+
         return <<<PROMPT
-Kamu adalah penulis blueprint Reels VO cinematic pendek untuk brand "{$kit->name}" niche {$kit->niche}.
-Karakter WAJIB konsisten di SEMUA prompt gambar/animasi:
+Kamu adalah ghostwriter viral Reels psikologi gelap untuk brand "{$kit->name}".
+Tujuan: blueprint yang BERPOTENSI SANGAT VIRAL — bukan konten edukasi biasa.
+
+Karakter visual WAJIB konsisten:
 - Nama: {$kit->character_name}
 - Visual: {$kit->character_visual}
 - Style: {$kit->visual_style}
 - Aspect: {$kit->aspect_ratio}
 - Font on-screen: {$kit->on_screen_font}
-- Sudut VO: "{$kit->voice_perspective}" (bahasa Indonesia santai, tajam, psikologi gelap)
+- Sudut VO: "{$kit->voice_perspective}" (bahasa Indonesia tajam, sinis cerdas, bukan ceramah)
 - Hashtag: {$kit->caption_hashtags}
 
-Tema bersih: {$title}
-Topik bersih: {$topic}
-Hook: {$hook}
+Tema: {$title}
+Topik: {$topic}
+Hook ide (boleh diabaikan jika lemah/klise): {$hook}
 Angle: {$angle}
 {$radarBlock}
-DURASI TARGET: {$dur} detik. Beat tetap {$beat} detik.
-Jumlah scene WAJIB: {$beats} beat (timecode berurutan dari 00:00).
+DURASI: {$dur} detik · beat {$beat}s · tepat {$beats} scene.
 
-ATURAN KERAS NASKAH VO:
-- VO harus terdengar seperti dibacakan manusia di Reels.
-- DILARANG memasukkan angka skor, "Google minat", "YouTube ·", "pantauan otomatis", URL, metric, atau metadata radar.
-- DILARANG copy-paste judul mentah yang berisi tanda "—" + data riset.
-- Fokus insight psikologi + hook emosional.
+===== PRIORITAS #1: HOOK (detik 0–5) =====
+- Beat pertama menentukan viral. VO pembuka HARUS on-point, mengejutkan, spesifik.
+- Hook visual + teks on-screen + VO harus SELARAS dan saling memperkuat (pattern interrupt).
+- Teks on-screen beat 1: pendek, bold, clickbait cerdas (bukan spoiler jelek).
+- Image/motion beat 1: freeze-frame/kejutan visual yang bikin scroll berhenti.
 
-ATURAN KERAS THUMBNAIL:
-- thumbnail_prompt WAJIB menyertakan teks judul persis di dalam tanda kutip.
-- Font besar modern glowing yellow + dark drop shadow di atas gambar.
+DILARANG KERAS sebagai pembuka VO / teks:
+{$banned}
+- Jangan generic self-help. Jangan "tips 5 cara". Jangan basabasi.
 
-JSON SAJA dengan tepat {$beats} scene, tiap beat {$beat} detik.
+GAYA NASKAH YANG DIINGINKAN:
+- Mulai dari klaim tajam / kontradiksi / pengakuan gelap / fakta menyakitkan.
+- Contoh arah (JANGAN copy verbatim): "Aku mending kelihatan biasa tapi aset nambah..." / "Orang yang paling ramah di kantormu sering yang paling berbahaya."
+- Beat tengah: escalate insight. Beat akhir: punchline + CTA komentar/simpan.
+
+ATURAN LAIN:
+- DILARANG skor Google/YouTube/metrik radar di VO.
+- thumbnail_prompt WAJIB ada teks judul exact di quotes + visual hook kuat.
+
+JSON SAJA, tepat {$beats} scene.
 PROMPT;
     }
 
@@ -435,34 +448,58 @@ PROMPT;
         $preferStock = $this->preferStock
             ? 'UTAMAKAN stock + black (minimal AI). Target: ~70% stock, ~15% black, ~10% bumper, max ~5% ai.'
             : 'Boleh campur ai/stock/black/bumper seimbang.';
+        $banned = $this->bannedHookPhrasesForPrompt();
 
         return <<<PROMPT
-Kamu adalah penulis MASTER BLUEPRINT Reels Panjang / VOD Dark Psychology untuk brand "{$kit->name}".
-DURASI TARGET: {$totalSec} detik (~{$minutes} menit). Beat tetap {$beat} detik. Jumlah scene sekitar {$beatCount}.
+Kamu adalah penulis MASTER BLUEPRINT VOD Dark Psychology yang dirancang untuk SANGAT VIRAL untuk brand "{$kit->name}".
+Durasi {$totalSec}s (~{$minutes} mnt), beat {$beat}s, ~{$beatCount} scene.
 {$preferStock}
-Untuk stock: tulis "(Video Stok 10 Detik): deskripsi singkat Pexels/stock". Motion bisa "-".
-Untuk black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut".
-Untuk bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB ada bumper di akhir tiap bab.
-Bahasa Indonesia tajam untuk VO & teks layar.
+Stock: "(Video Stok 10 Detik): ...". Black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut". Bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB bumper akhir tiap bab.
 
-Tema bersih: {$title}
-Topik bersih: {$topic}
-Hook: {$hook}
+Tema: {$title}
+Topik: {$topic}
+Hook ide (abaikan jika klise): {$hook}
 Angle: {$angle}
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
-ATURAN KERAS: VO & teks layar DILARANG berisi metrik Google/YouTube, skor, URL, atau metadata radar.
-ATURAN THUMBNAIL: thumbnail_prompt WAJIB menulis teks judul exact di quotes.
 
-Struktur WAJIB (sesuaikan proporsi ke durasi {$totalSec}s):
-1) THE GOLDEN HOOK — cerita kasus + cliff + bumper
-2) BAB 1 — teori + contoh + bumper
-3) BAB 2 — cara lawan / reframing + bumper
-4) BAB 3 — 4 senjata/taktik + bumper
-5) PENUTUP STOIK — CTA + outro bumper
+===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
+- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik yang terkenal (Elon Musk, Jobs, Obama, Churchill, Seneca/sejarah, CEO, politisi, atlet, dll) yang relevan dengan topik.
+- Format: tahun/konteks singkat + situasi + konflik + twist psikologi → cliff ke topik episode.
+- Contoh gaya (jangan copy): "Tahun 2023, wartawan BBC duduk di hadapan Elon Musk..." lalu pertanyaan jebakan + pembalikan frame.
+- Tokoh & kejadian harus PLAUSIBEL / berbasis realita publik, bukan fiksi random.
+- Visual hook + teks on-screen di 3 beat pertama harus menghentikan scroll.
 
-JSON SAJA dengan scenes lengkap beat {$beat} detik, bumper antar bab, visual_type mayoritas "stock".
+DILARANG KERAS pembuka:
+{$banned}
+- Jangan mulai dengan tips. Jangan "hari ini kita bahas". Jangan basabasi.
+
+===== PRIORITAS VIRAL =====
+- Hook naskah + hook visual = aset utama.
+- Setiap bab: satu insight tajam + satu contoh kehidupan + satu kalimat yang mudah di-screenshot.
+- Bab 3: 4 senjata praktis yang actionable.
+- Penutup: stoik, CTA share/komentar, bukan summary lemah.
+
+ATURAN: no metrik radar di VO. Thumbnail WAJIB teks judul exact di quotes.
+Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab).
+JSON SAJA.
 PROMPT;
+    }
+
+    protected function bannedHookPhrasesForPrompt(): string
+    {
+        return <<<'TXT'
+- "Pernahkah kamu..."
+- "Apakah kamu..."
+- "Tahukah kamu..."
+- "Hai/Halo guys..."
+- "Di video kali ini..."
+- "Hari ini aku mau bahas..."
+- "Kali ini kita akan..."
+- "Dalam video ini..."
+- "Mari kita bahas..."
+- "Banyak orang tidak tahu..."
+TXT;
     }
 
     /**
@@ -481,13 +518,18 @@ PROMPT;
         $beat = $this->beatSeconds;
         $count = $this->beatCount();
 
+        $opening = $this->spokenLine($idea?->hook);
+        if ($opening === null || $this->looksLikeWeakHook($opening)) {
+            $opening = "{$voice} mending keliatan biasa aja soal {$theme}, daripada kelihatan hebat tapi dalamnya kosong.";
+        }
+
         $seedVos = [
-            $this->spokenLine($idea?->hook) ?: "{$voice} bilang begini: yang kelihatan tenang di luar, sering paling berantakan di dalam.",
-            $this->spokenLine($idea?->angle) ?: "Orang jarang sadar: {$theme} itu bukan soal orang lain — itu soal cara otakmu mencari kontrol.",
-            "Kalau ini nyampe, berhenti pura-pura oke soal {$theme}.",
+            $opening,
+            $this->spokenLine($idea?->angle) ?: "Yang paling berbahaya soal {$theme}: orang mengira itu normal, padahal itu jebakan kontrol.",
+            "Kalau kamu masih membela pola itu, berarti bingkainya yang menang — bukan kamu.",
             'Ubah pola sebelum pola itu yang ngubah hidupmu.',
-            'Simpan ini. Besok kamu bakal ketemu polanya lagi.',
-            'Kalau familiar, kamu nggak sendiri — tapi kamu bisa berhenti di sini.',
+            'Simpan ini. Besok kamu bakal ketemu polanya lagi — dan kali ini kamu sadar.',
+            'Kalau familiar, jangan cuma angguk. Putus polanya hari ini.',
         ];
         $locations = [
             'walking forward down a crowded, bustling Jakarta city street at night with glowing neon lights and bokeh traffic',
@@ -550,7 +592,10 @@ PROMPT;
         $cover = Str::upper(Str::limit($theme ?: 'EPISODE DARK PSYCHOLOGY', 70, ''));
         $shortTopic = Str::limit($theme, 80, '');
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #darkpsychology #psikologigelap #manipulasi #reelsfb';
-        $hookLine = $this->spokenLine($idea?->hook) ?: "Orang jarang sadar: {$shortTopic} adalah penjara kata yang dibangun diam-diam.";
+        $hookLine = $this->spokenLine($idea?->hook);
+        if ($hookLine === null || $this->looksLikeWeakHook($hookLine)) {
+            $hookLine = 'Tahun 2023, seorang wartawan senior duduk di hadapan Elon Musk dengan pertanyaan yang sudah dipoles agar dia terpojok.';
+        }
         $angleLine = $this->spokenLine($idea?->angle) ?: 'Kuasai bingkainya, kunci narasinya, tanyakan balik motif mereka.';
 
         $beat = $this->beatSeconds;
@@ -558,7 +603,15 @@ PROMPT;
         $count = $this->beatCount();
 
         $sectionDefs = [
-            ['THE GOLDEN HOOK', 0.20, [$hookLine, 'Pertanyaan jebakan sudah diluncurkan.', 'Asumsi beracun ditanam diam-diam.', 'Penjara kata mulai tertutup.', 'Orang biasa panik memberi alasan.', 'Yang paham psikologi gelap merebut bingkai.', "Ini inti dari: {$shortTopic}."]],
+            ['THE GOLDEN HOOK', 0.20, [
+                $hookLine,
+                'Dengan nada menyudutkan, pertanyaan jebakan diluncurkan — asumsi beracun sudah ditanam di dalamnya.',
+                'Orang biasa akan panik membela diri. Itu justru yang diinginkan.',
+                'Tapi yang paham psikologi gelap tidak menjawab bingkai itu — dia merusaknya.',
+                'Satu pertanyaan balik cukup untuk membalikkan seluruh realita percakapan.',
+                'Dalam hitungan detik, kendali berpindah tanpa bentakan.',
+                "Itulah anatomi dari: {$shortTopic}.",
+            ]],
             ['BAB 1', 0.22, ['Pola ini sudah dipetakan lama.', 'Lawan terdesak memaksa penjelasan.', 'Di situlah kelemahanmu muncul.', 'Contoh di kantor sehari-hari.', 'Waktu digabung dengan integritas.', 'Penjelasan panjang terdengar seperti rengekan.', 'Semakin banyak alasan, semakin mudah dimanipulasi.']],
             ['BAB 2', 0.20, ['Cara merebut kembali kendali percakapan.', 'Tatap. Tahan jeda 2 detik.', 'Pakai reframing dengan suara datar.', $angleLine, 'Dalam satu kalimat bingkai tuduhan remuk.', 'Kamu tidak membentak — kamu merebut mahkota.']],
             ['BAB 3', 0.23, ['Simpan 4 pola pembalikan narasi.', '1. Mirroring Motive — tanyakan balik motif.', '2. Merusak asumsi di dalam pertanyaan.', '3. Buat aturan main baru, jangan pilih dilema.', '4. Keheningan taktis 3–5 detik.', 'Keheningan yang tenang lebih menakutkan dari teriakan.']],
@@ -823,12 +876,17 @@ PROMPT;
             return null;
         }
 
-        if ($this->looksLikeMetaInstruction($line)) {
+        if ($this->looksLikeMetaInstruction($line) || $this->looksLikeWeakHook($line)) {
             return null;
         }
 
         $clean = $this->spokenTheme($line, $line);
-        if ($this->looksLikeMetaInstruction($clean) || $this->looksLikeRadarNoise($clean) || $this->looksLikeRadarNoise($line)) {
+        if (
+            $this->looksLikeMetaInstruction($clean)
+            || $this->looksLikeWeakHook($clean)
+            || $this->looksLikeRadarNoise($clean)
+            || $this->looksLikeRadarNoise($line)
+        ) {
             return null;
         }
 
@@ -843,6 +901,11 @@ PROMPT;
     protected function looksLikeMetaInstruction(string $text): bool
     {
         return (bool) preg_match('/radar otomatis|buat sudut|tulis ulang|jangan copy|jangan dibaca|relatable \+ insight|auto radar|seed\)|sudut personal kea/i', $text);
+    }
+
+    protected function looksLikeWeakHook(string $text): bool
+    {
+        return (bool) preg_match('/^\s*(pernahkah kamu|apakah kamu|tahukah kamu|hai\b|halo\b|guys\b|di video|hari ini aku|kali ini kita|mari kita|banyak orang tidak tahu|kalau kamu lagi ngerasa)/iu', $text);
     }
 
     protected function ensureThumbnailHasTitle(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
