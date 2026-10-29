@@ -19,6 +19,9 @@ class ContentBlueprint extends Model
         'status',
         'format',
         'engine',
+        'duration_seconds',
+        'beat_seconds',
+        'prefer_stock',
         'scenes',
         'thumbnail_prompt',
         'caption',
@@ -32,6 +35,9 @@ class ContentBlueprint extends Model
             'scenes' => 'array',
             'title_options' => 'array',
             'planned_date' => 'date',
+            'prefer_stock' => 'boolean',
+            'duration_seconds' => 'integer',
+            'beat_seconds' => 'integer',
         ];
     }
 

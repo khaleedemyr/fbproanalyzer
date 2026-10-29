@@ -62,11 +62,20 @@ async function makeBlueprint(signal, format, event) {
     message.value = '';
     error.value = '';
     try {
-        const { data: res } = await http.post('/blueprints/generate', {
-            trend_signal_id: signal.id,
-            format,
-        });
-        message.value = `Blueprint siap: ${res.data.cover_theme || res.data.title}`;
+        const payload = { trend_signal_id: signal.id, format };
+        if (format === 'reels_panjang') {
+            const minutes = Number(prompt('Durasi video panjang (menit)? 5–15', '10') || '10');
+            payload.duration_minutes = Math.min(20, Math.max(3, minutes || 10));
+            payload.prefer_stock = true;
+        } else {
+            const seconds = Number(prompt('Durasi Reels VO (detik)? 10–60', '15') || '15');
+            payload.duration_seconds = Math.min(90, Math.max(10, seconds || 15));
+        }
+        const { data: res } = await http.post('/blueprints/generate', payload);
+        message.value = res.duplicate
+            ? res.message
+            : `Blueprint siap: ${res.data.cover_theme || res.data.title}`;
+        if (res.warning) error.value = res.warning;
         router.push({ name: 'blueprint-detail', params: { id: res.data.id } });
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal buat blueprint dari sinyal.';

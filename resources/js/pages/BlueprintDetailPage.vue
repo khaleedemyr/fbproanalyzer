@@ -110,6 +110,12 @@ onMounted(load);
                     >
                         {{ engineLabel }}
                     </span>
+                    <span v-if="bp.duration_seconds" class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+                        {{ bp.duration_seconds }}s · beat {{ bp.beat_seconds || 5 }}s
+                    </span>
+                    <span v-if="bp.prefer_stock" class="rounded bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-800">
+                        Utama stock
+                    </span>
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>

@@ -22,6 +22,12 @@ class BlueprintGeneratorService
 
     protected bool $wasDuplicate = false;
 
+    protected int $durationSeconds = 15;
+
+    protected int $beatSeconds = 5;
+
+    protected bool $preferStock = true;
+
     public function lastEngine(): string
     {
         return $this->lastEngine;
@@ -37,6 +43,9 @@ class BlueprintGeneratorService
         return $this->wasDuplicate;
     }
 
+    /**
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     */
     public function generateFromTopic(
         User $user,
         string $topic,
@@ -46,10 +55,13 @@ class BlueprintGeneratorService
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
         bool $force = false,
+        array $options = [],
     ): ContentBlueprint {
         $kit = $brandKit ?? BrandKit::defaultFor($user);
         $topic = trim($topic) !== '' ? trim($topic) : 'Topik psikologi viral';
         $format = $this->normalizeFormat($format);
+        $force = $force || (bool) ($options['force'] ?? false);
+        $this->applyDurationOptions($format, $options);
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
@@ -100,6 +112,9 @@ class BlueprintGeneratorService
             'status' => $plannedDate ? 'scheduled' : 'ready',
             'format' => $format,
             'engine' => $this->lastEngine,
+            'duration_seconds' => $this->durationSeconds,
+            'beat_seconds' => $this->beatSeconds,
+            'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? $this->preferStock : false,
             'scenes' => $payload['scenes'],
             'thumbnail_prompt' => $payload['thumbnail_prompt'],
             'caption' => $payload['caption'],
@@ -108,32 +123,40 @@ class BlueprintGeneratorService
         ]);
     }
 
+    /**
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     */
     public function generateFromIdea(
         User $user,
         ContentIdea $idea,
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
         bool $force = false,
+        array $options = [],
     ): ContentBlueprint {
         $topic = $idea->title;
         if ($idea->hook) {
             $topic .= ' — '.$idea->hook;
         }
 
-        return $this->generateFromTopic($user, $topic, null, $idea, null, $plannedDate, $format, $force);
+        return $this->generateFromTopic($user, $topic, null, $idea, null, $plannedDate, $format, $force, $options);
     }
 
+    /**
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     */
     public function generateFromSignal(
         User $user,
         TrendSignal $signal,
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
         bool $force = false,
+        array $options = [],
     ): ContentBlueprint {
         // Jangan append snippet radar (metrik Google/YouTube) ke topik — itu bocor ke naskah VO.
         $topic = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
 
-        return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format, $force);
+        return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format, $force, $options);
     }
 
     public function findExistingByTitle(User $user, string $title, string $format): ?ContentBlueprint
@@ -357,8 +380,12 @@ class BlueprintGeneratorService
         $angle = $idea?->angle ?: '';
         $radarBlock = $radarContext !== '' ? "Konteks riset (JANGAN dibaca di VO, hanya inspirasi sudut):\n{$radarContext}\n" : '';
 
+        $beats = $this->beatCount();
+        $dur = $this->durationSeconds;
+        $beat = $this->beatSeconds;
+
         return <<<PROMPT
-Kamu adalah penulis blueprint Reels VO cinematic pendek (~15 detik) untuk brand "{$kit->name}" niche {$kit->niche}.
+Kamu adalah penulis blueprint Reels VO cinematic pendek untuk brand "{$kit->name}" niche {$kit->niche}.
 Karakter WAJIB konsisten di SEMUA prompt gambar/animasi:
 - Nama: {$kit->character_name}
 - Visual: {$kit->character_visual}
@@ -373,6 +400,9 @@ Topik bersih: {$topic}
 Hook: {$hook}
 Angle: {$angle}
 {$radarBlock}
+DURASI TARGET: {$dur} detik. Beat tetap {$beat} detik.
+Jumlah scene WAJIB: {$beats} beat (timecode berurutan dari 00:00).
+
 ATURAN KERAS NASKAH VO:
 - VO harus terdengar seperti dibacakan manusia di Reels.
 - DILARANG memasukkan angka skor, "Google minat", "YouTube ·", "pantauan otomatis", URL, metric, atau metadata radar.
@@ -380,31 +410,10 @@ ATURAN KERAS NASKAH VO:
 - Fokus insight psikologi + hook emosional.
 
 ATURAN KERAS THUMBNAIL:
-- thumbnail_prompt WAJIB menyertakan teks judul persis di dalam tanda kutip, contoh: the text "TOXIC RELATIONSHIP" is boldly displayed...
-- Jangan cuma bilang "title overlay aesthetic" tanpa menulis judulnya.
+- thumbnail_prompt WAJIB menyertakan teks judul persis di dalam tanda kutip.
 - Font besar modern glowing yellow + dark drop shadow di atas gambar.
 
-JSON SAJA:
-{
-  "title": "...",
-  "cover_theme": "JUDUL COVER HURUF BESAR",
-  "story_concept": "...",
-  "scenes": [
-    {
-      "section": "HOOK",
-      "timecode": "00:00 - 00:05",
-      "visual_type": "ai",
-      "vo": "...",
-      "on_screen": "TEKS\\n\\n(Font: Anton, Warna: ...)",
-      "image_prompt": "English Leonardo 9:16 MUST include stickman tuxedo + yellow rubber duck",
-      "motion_prompt": "English I2V motion"
-    }
-  ],
-  "thumbnail_prompt": "A vertical 9:16 cinematic graphic design for a video thumbnail. ... At the top of the image, the text \\"JUDUL COVER HURUF BESAR\\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. ...",
-  "caption": "...",
-  "title_options": []
-}
-Tepat 3 scene: 00:00-00:05, 00:05-00:10, 00:10-00:15.
+JSON SAJA dengan tepat {$beats} scene, tiap beat {$beat} detik.
 PROMPT;
     }
 
@@ -419,10 +428,22 @@ PROMPT;
         $angle = $idea?->angle ?: '';
         $radarBlock = $radarContext !== '' ? "Konteks riset (JANGAN dibaca di VO):\n{$radarContext}\n" : '';
 
+        $totalSec = $this->durationSeconds;
+        $beat = $this->beatSeconds;
+        $beatCount = $this->beatCount();
+        $minutes = max(1, (int) round($totalSec / 60));
+        $preferStock = $this->preferStock
+            ? 'UTAMAKAN stock + black (minimal AI). Target: ~70% stock, ~15% black, ~10% bumper, max ~5% ai.'
+            : 'Boleh campur ai/stock/black/bumper seimbang.';
+
         return <<<PROMPT
-Kamu adalah penulis MASTER BLUEPRINT Reels Panjang / VOD Dark Psychology (~8-10 menit) untuk brand "{$kit->name}".
-Gaya: cinematic dark psychology (bukan stickman). Campur visual_type: "ai", "stock", "black", "bumper".
-Beat tiap ~5 detik. Bahasa Indonesia tajam untuk VO & teks layar. Prompt visual/motion dalam English.
+Kamu adalah penulis MASTER BLUEPRINT Reels Panjang / VOD Dark Psychology untuk brand "{$kit->name}".
+DURASI TARGET: {$totalSec} detik (~{$minutes} menit). Beat tetap {$beat} detik. Jumlah scene sekitar {$beatCount}.
+{$preferStock}
+Untuk stock: tulis "(Video Stok 10 Detik): deskripsi singkat Pexels/stock". Motion bisa "-".
+Untuk black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut".
+Untuk bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB ada bumper di akhir tiap bab.
+Bahasa Indonesia tajam untuk VO & teks layar.
 
 Tema bersih: {$title}
 Topik bersih: {$topic}
@@ -431,41 +452,16 @@ Angle: {$angle}
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
 ATURAN KERAS: VO & teks layar DILARANG berisi metrik Google/YouTube, skor, URL, atau metadata radar.
-ATURAN THUMBNAIL: thumbnail_prompt WAJIB menulis teks judul exact di quotes, contoh: the text "JUDUL COVER" is boldly displayed in large glowing yellow font. Jangan hanya "title overlay aesthetic".
+ATURAN THUMBNAIL: thumbnail_prompt WAJIB menulis teks judul exact di quotes.
 
-Struktur WAJIB:
-1) THE GOLDEN HOOK (00:00-02:00) — cerita kasus/tokoh + cliff ke topik
-2) BAB 1 (02:00-04:30) — teori + contoh kehidupan
-3) BAB 2 (04:30-06:40) — cara lawan / reframing
-4) BAB 3 (06:40-08:50) — 4 senjata/taktik praktis
-5) PENUTUP STOIK (08:50-10:20) — CTA share + bumper
+Struktur WAJIB (sesuaikan proporsi ke durasi {$totalSec}s):
+1) THE GOLDEN HOOK — cerita kasus + cliff + bumper
+2) BAB 1 — teori + contoh + bumper
+3) BAB 2 — cara lawan / reframing + bumper
+4) BAB 3 — 4 senjata/taktik + bumper
+5) PENUTUP STOIK — CTA + outro bumper
 
-JSON SAJA:
-{
-  "title": "Episode: ...",
-  "cover_theme": "JUDUL EPISODE",
-  "story_concept": "ringkas 1-2 kalimat",
-  "scenes": [
-    {
-      "section": "THE GOLDEN HOOK (00:00 - 02:00)",
-      "timecode": "00:00-00:05",
-      "visual_type": "ai",
-      "image_prompt": "Cinematic ... OR (Video Stok 10 Detik): ... OR (Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut OR Bumper KEA Abbasy",
-      "motion_prompt": "..." ,
-      "vo": "...",
-      "on_screen": "TEKS LAYAR SINGKAT"
-    }
-  ],
-  "thumbnail_prompt": "A vertical 9:16 cinematic thumbnail... At the top, the text \\"JUDUL COVER\\" is boldly displayed in large glowing yellow font with dark drop shadow...",
-  "caption": "caption panjang ID + CTA + hashtags",
-  "title_options": [
-    "Opsi fokusik...",
-    "Opsi rasa sakit...",
-    "Opsi clickbait...",
-    "Opsi tokoh..."
-  ]
-}
-Minimal 40 scene beat 5 detik. Akhir tiap bab boleh bumper KEA Abbasy (visual_type bumper, VO kosong).
+JSON SAJA dengan scenes lengkap beat {$beat} detik, bumper antar bab, visual_type mayoritas "stock".
 PROMPT;
     }
 
@@ -482,57 +478,70 @@ PROMPT;
         $font = $kit->on_screen_font ?: 'Anton';
         $voice = $kit->voice_perspective ?: 'Aku';
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral';
+        $beat = $this->beatSeconds;
+        $count = $this->beatCount();
 
-        $vos = [
+        $seedVos = [
             $this->spokenLine($idea?->hook) ?: "{$voice} bilang begini: yang kelihatan tenang di luar, sering paling berantakan di dalam.",
             $this->spokenLine($idea?->angle) ?: "Orang jarang sadar: {$theme} itu bukan soal orang lain — itu soal cara otakmu mencari kontrol.",
-            'Kalau ini nyampe, berhenti pura-pura oke. Ubah pola sebelum pola itu yang ngubah hidupmu.',
+            "Kalau ini nyampe, berhenti pura-pura oke soal {$theme}.",
+            'Ubah pola sebelum pola itu yang ngubah hidupmu.',
+            'Simpan ini. Besok kamu bakal ketemu polanya lagi.',
+            'Kalau familiar, kamu nggak sendiri — tapi kamu bisa berhenti di sini.',
         ];
         $locations = [
             'walking forward down a crowded, bustling Jakarta city street at night with glowing neon lights and bokeh traffic',
             'standing near a crowded outdoor cafe terrace under neon signs, dark comedy psychology aesthetic',
             'walking past a glowing storefront window in a crowded downtown walkway, grit urban texture',
+            'sitting alone on a dim rooftop overlooking neon city skyline, contemplative mood',
+            'crossing a rainy crosswalk under streetlights, reflections on wet asphalt',
+            'standing in a quiet elevator mirror hallway, high contrast rim light',
         ];
-        $shots = ['wide shot', 'medium shot', 'close-up shot'];
+        $shots = ['wide shot', 'medium shot', 'close-up shot', 'tracking shot', 'over-the-shoulder shot', 'low angle shot'];
         $motions = [
             'The stickman character walks forward steadily toward the camera through the blurred, busy crowd, with neon lights reflecting smoothly on its tuxedo and a natural fluid walking cycle.',
             'The stickman character slowly turns its head toward the camera, while pedestrians blur softly in the background. Natural micro-movements.',
             'The camera tracks smoothly alongside the character walking forward, with natural lighting shifting across its frame and background reflections moving dynamically.',
+            'Slow push-in on the character as city lights shimmer behind. Subtle breathing motion.',
+            'Gentle parallax as the character stands still while traffic bokeh drifts past.',
+            'Camera orbits slightly around the tuxedo stickman holding the yellow rubber duck.',
         ];
-        $onScreens = [
+        $onSeed = [
             "{$cover} 🛑\n\n(Font: {$font}, Warna: Merah & Putih)",
             Str::upper(Str::limit($short, 28, ''))." ⚠️\n\n(Font: {$font}, Warna: Kuning Emas)",
             "SADAR SEBELUM TERLAMBAT! 🔥\n\n(Font: {$font}, Warna: Kuning & Putih)",
+            "POLA INI NYATA 👁️\n\n(Font: {$font}, Warna: Putih)",
+            "STOP DULU. ✋\n\n(Font: {$font}, Warna: Merah)",
+            "KAMU BISA KELUAR. 💡\n\n(Font: {$font}, Warna: Emas)",
         ];
-        $timecodes = ['00:00 - 00:05', '00:05 - 00:10', '00:10 - 00:15'];
 
         $scenes = [];
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0; $i < $count; $i++) {
+            $start = $i * $beat;
+            $end = $start + $beat;
             $scenes[] = [
                 'section' => 'REELS VO',
-                'timecode' => $timecodes[$i],
+                'timecode' => $this->formatTimecode($start, $end),
                 'visual_type' => 'ai',
-                'vo' => $vos[$i],
-                'on_screen' => $onScreens[$i],
-                'image_prompt' => "A vertical {$kit->aspect_ratio} cinematic {$shots[$i]} of {$char} {$locations[$i]}. {$style}. Ultra-detailed, consistent character design. --ar 9:16",
-                'motion_prompt' => "A cinematic 3D motion. {$motions[$i]}",
+                'vo' => $seedVos[$i % count($seedVos)],
+                'on_screen' => $onSeed[$i % count($onSeed)],
+                'image_prompt' => "A vertical {$kit->aspect_ratio} cinematic {$shots[$i % count($shots)]} of {$char} {$locations[$i % count($locations)]}. {$style}. Ultra-detailed, consistent character design. --ar 9:16",
+                'motion_prompt' => "A cinematic 3D motion. {$motions[$i % count($motions)]}",
             ];
         }
 
         return [
             'title' => Str::limit($theme, 120, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Karakter {$kit->character_name} berjas rapi berjalan di keramaian kota malam, membongkar sudut gelap dari: {$theme}.",
+            'story_concept' => "Reels VO {$this->durationSeconds} dtk (beat {$beat}s). Karakter {$kit->character_name} membongkar: {$theme}.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical {$kit->aspect_ratio} cinematic graphic design for a video thumbnail. {$char} in a bustling neon-lit Jakarta street at night. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. High contrast, urban cinematic aesthetic, professional film grain, no offensive elements.",
-            'caption' => trim($vos[0])."\n\nRealitanya, {$theme} sering jadi jebakan yang terasa biasa — sampai kamu sadar biayanya terlalu mahal.\n\nSetuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n".$hashtags,
+            'caption' => trim($seedVos[0])."\n\nRealitanya, {$theme} sering jadi jebakan yang terasa biasa — sampai kamu sadar biayanya terlalu mahal.\n\nSetuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n".$hashtags,
             'title_options' => [],
         ];
     }
 
     /**
-     * Template ringkas struktur Master Blueprint reels panjang (tanpa Gemini).
-     *
      * @return array{title:string,cover_theme:string,story_concept:string,scenes:array<int,array<string,mixed>>,thumbnail_prompt:string,caption:string,title_options:array<int,string>}
      */
     protected function buildLongTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
@@ -542,96 +551,205 @@ PROMPT;
         $shortTopic = Str::limit($theme, 80, '');
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #darkpsychology #psikologigelap #manipulasi #reelsfb';
         $hookLine = $this->spokenLine($idea?->hook) ?: "Orang jarang sadar: {$shortTopic} adalah penjara kata yang dibangun diam-diam.";
+        $angleLine = $this->spokenLine($idea?->angle) ?: 'Kuasai bingkainya, kunci narasinya, tanyakan balik motif mereka.';
 
-        $beats = [
-            // GOLDEN HOOK
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:00-00:05', 'ai', 'Cinematic portrait. A sharp man in a dark suit sitting across a dimly lit luxury wooden table.', 'Extremely slow zoom in. Subtle smoke rising, warm lamp flicker.', $hookLine, 'KASUS PEMBUKA'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:05-00:10', 'stock', '(Video Stok 10 Detik): Micro expression of a person looking aggressive in shadows.', '-', 'Dengan nada menyudutkan, lawan bicara melemparkan pertanyaan jebakan.', 'PERTANYAAN JEBAKAN'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:10-00:15', 'stock', '(Lanjutan Video Stok Pexels di atas)', '-', '"Kenapa kamu membiarkan hal itu terjadi?" — asumsi beracun sudah ditanam.', '"KENAPA DIBIARKAN?"'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:15-00:20', 'ai', 'Abstract concept. A glowing steel trap snapping shut in slow motion.', 'The jaws of the trap slam shut violently, scattering golden sparks in the dark.', 'Perhatikan: dia sedang membangun sebuah penjara kata.', 'MEMBANGUN PENJARA KATA'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:20-00:25', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Orang biasa yang panik akan langsung sibuk memberi alasan.', 'SIBUK MEMBERI ALASAN'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:25-00:30', 'black', '(Lanjutan Layar Hitam di atas)', '-', '...menjelaskan detail, atau memohon agar dipercaya.', 'MEMOHON DIPERCAYA'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:30-00:35', 'ai', 'Bizarre macro. A chessboard where the black king stands perfectly still amidst chaos.', 'The board shakes violently, pieces fall, but the black king remains static.', 'Tapi yang paham psikologi gelap tidak membela diri — dia merebut bingkai.', 'KENDALI PERCAKAPAN'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:35-00:40', 'ai', 'Abstract destruction. A glass frame shattering into a million pieces.', 'Extreme slow motion. The glass shatters outwards, reflecting golden light.', 'Satu pertanyaan balik cukup untuk merusak seluruh bingkai tuduhan.', 'MERUSAK BINGKAI TUDUHAN'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:40-00:45', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', '"Kasih saya SATU bukti konkret. Satu saja."', '"SATU SAJA."'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:45-00:50', 'stock', '(Video Stok 10 Detik): Man in suit looking nervous in shadows.', '-', 'Lawan bicara mendadak gelagapan — narasinya hancur tanpa bentakan.', 'NARASI HANCUR TOTAL'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:50-00:55', 'ai', 'Abstract geometry. A glowing golden lock snapping shut on a black box.', 'The lock slams shut with a heavy, satisfying mechanical click.', "Ini disebut Frame Control — inti dari: {$shortTopic}.", 'TAKTIK FRAME CONTROL'],
-            ['THE GOLDEN HOOK (00:00 - 02:00)', '00:55-01:00', 'bumper', 'Bumper KEA Abbasy (Video Intro / Logo KEA Abbasy)', '(SFX Bumper / Jeda VO)', '', 'BAB 1: BENTUK KEKALAHAN'],
+        $beat = $this->beatSeconds;
+        $total = $this->durationSeconds;
+        $count = $this->beatCount();
 
-            // BAB 1
-            ['BAB 1 (02:00 - 04:30)', '02:00-02:05', 'ai', 'Cinematic surrealism. An old vintage book opening by itself in the dark.', 'The pages turn rapidly, revealing glowing golden text on black paper.', 'Filsuf dan ahli taktik perang kata sudah lama memetakan pola ini.', 'POLA LAMA, MASIH MEMATIKAN'],
-            ['BAB 1 (02:00 - 04:30)', '02:05-02:10', 'stock', '(Video Stok 10 Detik): Abstract black ink swirling on parchment paper.', '-', 'Lawan yang terdesak akan memaksamu memberi penjelasan rinci.', 'MEMAKSA MEMBERI PENJELASAN'],
-            ['BAB 1 (02:00 - 04:30)', '02:10-02:15', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Karena dalam penjelasan itulah terdapat kelemahanmu.', 'DI SITULAH KELEMAHANMU'],
-            ['BAB 1 (02:00 - 04:30)', '02:15-02:20', 'stock', '(Video Stok 10 Detik): Office worker looking stressed under dramatic lighting.', '-', 'Di kantor, rekan intimidatif memojokkanmu di depan orang lain.', 'REKAN KERJA INTIMIDATIF'],
-            ['BAB 1 (02:00 - 04:30)', '02:20-02:25', 'ai', 'Cinematic macro. A sharp pendulum swinging aggressively over a desk.', 'The pendulum swings fast, slicing the air in slow motion.', '"Kamu ini niat kerja atau tidak? Kenapa belum selesai?"', '"NIAT KERJA TIDAK SIH?"'],
-            ['BAB 1 (02:00 - 04:30)', '02:25-02:30', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Dia menggabungkan dua hal yang tidak berhubungan: waktu dan integritasmu.', 'MENGGABUNGKAN 2 HAL'],
-            ['BAB 1 (02:00 - 04:30)', '02:30-02:35', 'stock', '(Video Stok 10 Detik): Person holding head in hands panicking.', '-', 'Kalau kamu bereaksi lemah, refleksmu adalah panik dan menjelaskan panjang lebar.', 'PANIK & MEMBERI PENJELASAN'],
-            ['BAB 1 (02:00 - 04:30)', '02:35-02:40', 'ai', 'Cinematic conceptual. A tiny silhouetted child crying in front of a giant.', 'The child shadow shrinks while the giant shadow grows larger and darker.', 'Di mata lawan, penjelasanmu terdengar seperti rengekan anak kecil.', 'SEPERTI RENGEKAN ANAK KECIL'],
-            ['BAB 1 (02:00 - 04:30)', '02:40-02:45', 'ai', 'Surreal dark art. A mouth sealed shut with a heavy iron lock.', 'The lock shines coldly in the dark, remaining perfectly shut.', 'Semakin banyak alasan, semakin kamu terlihat mudah dimanipulasi.', 'TERLIHAT LEMAH'],
-            ['BAB 1 (02:00 - 04:30)', '02:45-02:50', 'ai', 'Abstract geometry. A person handing over a glowing crown to a shadow.', 'The shadow snatches the crown, absorbing its golden light completely.', 'Saat kamu menjelaskan, kamu menyerahkan otoritas moral kepadanya.', 'MENYERAHKAN OTORITAS'],
-            ['BAB 1 (02:00 - 04:30)', '02:50-03:00', 'bumper', 'Bumper KEA Abbasy', '(SFX Bumper)', '', 'BAB 2: CARA MELAWAN'],
-
-            // BAB 2
-            ['BAB 2 (04:30 - 06:40)', '04:30-04:35', 'ai', 'Golden scale balancing perfectly in darkness.', 'Scale finds equilibrium with a soft glow.', 'Sekarang: cara merebut kembali mahkota kendali percakapan.', 'REBUT KENDALI'],
-            ['BAB 2 (04:30 - 06:40)', '04:35-04:40', 'stock', '(Video Stok 10 Detik): Cold staring eye without blinking.', '-', 'Tatap matanya. Tahan jeda 2 detik tanpa suara.', 'TATAP & JEDA 2 DETIK'],
-            ['BAB 2 (04:30 - 06:40)', '04:40-04:45', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Lalu gunakan reframing dengan suara datar dan dingin.', 'GUNAKAN REFRAMING'],
-            ['BAB 2 (04:30 - 06:40)', '04:45-04:50', 'ai', 'Macro text on vintage paper under spotlight.', 'Focus pull on glowing words.', $idea?->angle ?: "'Pertanyaan yang lebih tepat: apakah fokus kita kualitas — atau buru-buru berantakan?'", 'UBAH ARENA PERMAINAN'],
-            ['BAB 2 (04:30 - 06:40)', '04:50-04:55', 'ai', 'Hourglass reversing flow of golden sand.', 'Sand flows upwards against gravity.', 'Dalam satu kalimat, bingkai tuduhannya remuk — posisi kalian berbalik.', 'POSISI BERBALIK 180 DERAJAT'],
-            ['BAB 2 (04:30 - 06:40)', '04:55-05:00', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Kamu tidak membentak. Kamu hanya merebut mahkota kendali.', 'MEREBUT MAHKOTA KENDALI'],
-            ['BAB 2 (04:30 - 06:40)', '05:00-05:10', 'bumper', 'Bumper KEA Abbasy', '(SFX Bumper)', '', 'BAB 3: 4 SENJATA GELAP'],
-
-            // BAB 3
-            ['BAB 3 (06:40 - 08:50)', '06:40-06:45', 'ai', 'Four glowing pillars standing in complete darkness.', 'Slow pan across the pillars.', 'Simpan 4 pola pembalikan narasi ini dalam memorimu.', '4 POLA PEMBALIKAN'],
-            ['BAB 3 (06:40 - 08:50)', '06:45-06:50', 'ai', 'Dark mirror reflecting a distorted shadow.', 'Reflection distorts slightly.', 'Satu: Mirroring Motive — tanyakan balik motif pertanyaannya.', '1. MIRRORING MOTIVE'],
-            ['BAB 3 (06:40 - 08:50)', '06:50-06:55', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', '"Ada hal di hidupmu sendiri yang sedang membuatmu cemas?"', '"KAMU LAGI CEMAS?"'],
-            ['BAB 3 (06:40 - 08:50)', '06:55-07:00', 'ai', 'Poison drop hitting clear water.', 'Ripple effect in slow-mo.', 'Dua: Merusak Asumsi — tolak presupposisi di dalam pertanyaan.', '2. MERUSAK ASUMSI'],
-            ['BAB 3 (06:40 - 08:50)', '07:00-07:05', 'stock', '(Video Stok 10 Detik): Knife cutting a knot.', '-', '"Saya menolak asumsi itu. Mari bicara berdasarkan data objektif."', 'TOLAK ASUMSINYA'],
-            ['BAB 3 (06:40 - 08:50)', '07:05-07:10', 'ai', 'Two toxic vials swept off a table.', 'Vials crash and break.', 'Tiga: Counter-Constraint — jangan pilih dilema. Buat aturan main baru.', '3. KUNCI ATURAN MAIN'],
-            ['BAB 3 (06:40 - 08:50)', '07:10-07:15', 'ai', 'Deep dark empty void with a cold statue face.', 'Slow zoom on face.', 'Empat: Cold Tactical Silence — diam 3–5 detik, tatap tanpa ekspresi.', '4. KEHENINGAN TAKTIS'],
-            ['BAB 3 (06:40 - 08:50)', '07:15-07:20', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Keheningan pria tenang lebih menakutkan dari teriakan.', 'KEHENINGAN MENAKUTKAN'],
-            ['BAB 3 (06:40 - 08:50)', '07:20-07:30', 'bumper', 'Bumper KEA Abbasy', '(SFX Bumper)', '', 'PENUTUP STOIK'],
-
-            // PENUTUP
-            ['PENUTUP (08:50 - 10:20)', '08:50-08:55', 'ai', 'Puppeteer hands manipulating strings in darkness.', 'Hands pull strings slowly.', 'Dunia ini penuh orang yang mendikte siapa dirimu lewat pertanyaan jebakan.', 'PERTANYAAN JEBAKAN'],
-            ['PENUTUP (08:50 - 10:20)', '08:55-09:00', 'ai', 'Imposing stone fortress in the night.', 'Slow zoom on fortress.', 'Pikiranmu milikmu. Jangan serahkan Inner Citadel-mu.', 'INNER CITADEL'],
-            ['PENUTUP (08:50 - 10:20)', '09:00-09:05', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Lepaskan kebutuhan untuk selalu membela diri.', 'STOP MEMBELA DIRI'],
-            ['PENUTUP (08:50 - 10:20)', '09:05-09:10', 'stock', '(Video Stok 10 Detik): Calm confident man standing still.', '-', 'Kuasai bingkainya, kunci narasinya, tanyakan balik motif mereka.', 'KUASAI BINGKAINYA'],
-            ['PENUTUP (08:50 - 10:20)', '09:10-09:15', 'black', '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.', '-', 'Terima kasih telah mendengarkan KEA Abbasy. Bagikan video ini.', 'SHARE VIDEO INI'],
-            ['PENUTUP (08:50 - 10:20)', '09:15-09:20', 'bumper', 'Glowing logo KEA Abbasy / End Screen Outro', 'Subtle glow pulse', 'Tetap tenang, jaga bentengmu, pegang kendali hidupmu.', 'PEGGANG KENDALI HIDUPMU'],
+        $sectionDefs = [
+            ['THE GOLDEN HOOK', 0.20, [$hookLine, 'Pertanyaan jebakan sudah diluncurkan.', 'Asumsi beracun ditanam diam-diam.', 'Penjara kata mulai tertutup.', 'Orang biasa panik memberi alasan.', 'Yang paham psikologi gelap merebut bingkai.', "Ini inti dari: {$shortTopic}."]],
+            ['BAB 1', 0.22, ['Pola ini sudah dipetakan lama.', 'Lawan terdesak memaksa penjelasan.', 'Di situlah kelemahanmu muncul.', 'Contoh di kantor sehari-hari.', 'Waktu digabung dengan integritas.', 'Penjelasan panjang terdengar seperti rengekan.', 'Semakin banyak alasan, semakin mudah dimanipulasi.']],
+            ['BAB 2', 0.20, ['Cara merebut kembali kendali percakapan.', 'Tatap. Tahan jeda 2 detik.', 'Pakai reframing dengan suara datar.', $angleLine, 'Dalam satu kalimat bingkai tuduhan remuk.', 'Kamu tidak membentak — kamu merebut mahkota.']],
+            ['BAB 3', 0.23, ['Simpan 4 pola pembalikan narasi.', '1. Mirroring Motive — tanyakan balik motif.', '2. Merusak asumsi di dalam pertanyaan.', '3. Buat aturan main baru, jangan pilih dilema.', '4. Keheningan taktis 3–5 detik.', 'Keheningan yang tenang lebih menakutkan dari teriakan.']],
+            ['PENUTUP', 0.15, ['Dunia penuh pertanyaan jebakan.', 'Pikiranmu milikmu — jaga Inner Citadel.', 'Lepaskan kebutuhan selalu membela diri.', 'Kuasai bingkai, kunci narasi.', 'Terima kasih sudah mendengar KEA Abbasy. Bagikan video ini.']],
         ];
 
-        $scenes = array_map(fn ($b) => [
-            'section' => $b[0],
-            'timecode' => $b[1],
-            'visual_type' => $b[2],
-            'image_prompt' => $b[3],
-            'motion_prompt' => $b[4],
-            'vo' => $b[5],
-            'on_screen' => $b[6],
-        ], $beats);
-
-        $titleOptions = [
-            'JANGAN PERNAH Jawab Pertanyaan Mereka (Taktik Mengunci Lawan)',
-            'Cara Elegan Membungkam Orang yang Suka Menyudutkanmu',
-            '1 Kalimat Pembungkam: Taktik Psikologi Membalikkan Keadaan',
-            'Tiru Cara Orang Tajam Menghancurkan Pertanyaan Jebakan — '.$cover,
+        $stocks = [
+            '(Video Stok 10 Detik): Micro expression of a person looking aggressive in shadows.',
+            '(Video Stok 10 Detik): Close up male eye staring coldly without blinking.',
+            '(Video Stok 10 Detik): Office worker looking stressed under dramatic lighting.',
+            '(Video Stok 10 Detik): Person holding head in hands panicking.',
+            '(Video Stok 10 Detik): Dark ink forming abstract shapes in clear water.',
+            '(Video Stok 10 Detik): Chess pieces falling on a dark board.',
+            '(Video Stok 10 Detik): Man in suit looking nervous in shadows.',
+            '(Video Stok 10 Detik): Calm confident man standing still in low light.',
+            '(Video Stok 10 Detik): Hourglass and ticking clock macro.',
+            '(Video Stok 10 Detik): Shadow reversing direction abstract slow motion.',
+        ];
+        $aiSparse = [
+            'Cinematic abstract. A glowing steel trap snapping shut in slow motion.',
+            'Cinematic surrealism. A glass frame shattering into golden shards.',
+            'Abstract geometry. A glowing golden lock snapping shut on a black box.',
         ];
 
-        $caption = "Sering tiba-tiba merasa bersalah padahal kamu yang sedang diserang? Atau refleks panik dan sibuk membela diri saat dilempar pertanyaan yang menyudutkan?\n\n"
-            ."Hati-hati — kamu bisa sedang masuk ke dalam penjara kata.\n\n"
-            ."Di video ini aku membongkar anatomi {$shortTopic}: cara merebut bingkai, membalikkan keadaan, dan mengunci narasi lawan tanpa perlu marah.\n\n"
-            ."Tonton sampai habis. Siapa yang sering berhadapan dengan orang yang hobi memutarbalikkan fakta? Tulis di komentar. 👇\n\n"
-            .$hashtags;
+        $vosPool = [];
+        foreach ($sectionDefs as $def) {
+            foreach ($def[2] as $line) {
+                $vosPool[] = $line;
+            }
+        }
+
+        $contentBeats = max(10, $count - count($sectionDefs));
+        $alloc = [];
+        $used = 0;
+        foreach ($sectionDefs as $i => $def) {
+            if ($i === count($sectionDefs) - 1) {
+                $alloc[] = max(3, $contentBeats - $used);
+            } else {
+                $n = max(3, (int) round($contentBeats * $def[1]));
+                $alloc[] = $n;
+                $used += $n;
+            }
+        }
+
+        $scenes = [];
+        $t = 0;
+        $voIdx = 0;
+        $stockIdx = 0;
+        $aiIdx = 0;
+
+        foreach ($sectionDefs as $sIdx => $def) {
+            $name = $def[0];
+            $n = $alloc[$sIdx];
+            $sectionStart = $t;
+
+            for ($i = 0; $i < $n; $i++) {
+                $start = $t;
+                $end = $t + $beat;
+                $mod = $i % 5;
+
+                if ($this->preferStock) {
+                    if ($mod === 2) {
+                        $type = 'black';
+                        $visual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
+                        $motion = '-';
+                    } elseif ($sIdx === 0 && $i === 0) {
+                        $type = 'ai';
+                        $visual = $aiSparse[$aiIdx++ % count($aiSparse)];
+                        $motion = 'Extremely slow zoom in. Subtle atmospheric motion.';
+                    } else {
+                        $type = 'stock';
+                        $visual = $stocks[$stockIdx++ % count($stocks)];
+                        $motion = '-';
+                    }
+                } elseif ($mod === 0) {
+                    $type = 'ai';
+                    $visual = $aiSparse[$aiIdx++ % count($aiSparse)];
+                    $motion = 'Extremely slow zoom in. Subtle atmospheric motion.';
+                } elseif ($mod === 2) {
+                    $type = 'black';
+                    $visual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
+                    $motion = '-';
+                } else {
+                    $type = 'stock';
+                    $visual = $stocks[$stockIdx++ % count($stocks)];
+                    $motion = '-';
+                }
+
+                $vo = $vosPool[$voIdx % count($vosPool)];
+                $voIdx++;
+                $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $cover, 34, ''));
+
+                $scenes[] = [
+                    'section' => $name.' ('.$this->formatTimecode($sectionStart, $sectionStart + ($n * $beat)).')',
+                    'timecode' => $this->formatTimecode($start, $end),
+                    'visual_type' => $type,
+                    'image_prompt' => $visual,
+                    'motion_prompt' => $motion,
+                    'vo' => $vo,
+                    'on_screen' => $on,
+                ];
+                $t = $end;
+            }
+
+            $start = $t;
+            $end = $t + $beat;
+            $scenes[] = [
+                'section' => $name.' ('.$this->formatTimecode($sectionStart, $end).')',
+                'timecode' => $this->formatTimecode($start, $end),
+                'visual_type' => 'bumper',
+                'image_prompt' => 'Bumper KEA Abbasy (Video Intro / Logo KEA Abbasy)',
+                'motion_prompt' => '(SFX Bumper / Jeda VO)',
+                'vo' => '',
+                'on_screen' => $sIdx < count($sectionDefs) - 1 ? $sectionDefs[$sIdx + 1][0] : 'OUTRO',
+            ];
+            $t = $end;
+        }
+
+        while ((count($scenes) * $beat) > ($total + $beat) && count($scenes) > 12) {
+            for ($i = count($scenes) - 2; $i > 5; $i--) {
+                if (($scenes[$i]['visual_type'] ?? '') !== 'bumper') {
+                    array_splice($scenes, $i, 1);
+                    break;
+                }
+            }
+            $t = 0;
+            foreach ($scenes as &$sc) {
+                $sc['timecode'] = $this->formatTimecode($t, $t + $beat);
+                $t += $beat;
+            }
+            unset($sc);
+        }
+
+        $minutes = max(1, (int) round($this->durationSeconds / 60));
+        $caption = "Sering tiba-tiba merasa bersalah padahal kamu yang sedang diserang?\n\n"
+            ."Di video ini (~{$minutes} menit) aku membongkar anatomi {$shortTopic}: merebut bingkai, membalikkan keadaan, mengunci narasi lawan.\n\n"
+            ."Tonton sampai habis. Tulis di komentar. 👇\n\n".$hashtags;
 
         return [
-            'title' => 'Episode: '.Str::limit($title, 100, ''),
+            'title' => 'Episode: '.Str::limit($theme, 100, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Master blueprint reels panjang tentang {$shortTopic}: Golden Hook → teori → reframing → 4 senjata → penutup stoik.",
+            'story_concept' => "Master blueprint {$minutes} mnt (beat {$beat}s, ".($this->preferStock ? 'utamakan stock' : 'campur visual').") tentang {$shortTopic}: Hook → Bab → Penutup + bumper.",
             'scenes' => $scenes,
-            'thumbnail_prompt' => "A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene related to frame control and verbal traps. Bold glowing yellow title text \"{$cover}\" at the top with dark drop shadow. Professional film grain, no offensive elements.",
+            'thumbnail_prompt' => "A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. Professional film grain, no offensive elements.",
             'caption' => $caption,
-            'title_options' => $titleOptions,
+            'title_options' => [
+                'JANGAN PERNAH Jawab Pertanyaan Mereka (Taktik Mengunci Lawan)',
+                'Cara Elegan Membungkam Orang yang Suka Menyudutkanmu',
+                '1 Kalimat Pembungkam: Taktik Psikologi Membalikkan Keadaan',
+                'Tiru Cara Orang Tajam Menghancurkan Pertanyaan Jebakan — '.$cover,
+            ],
         ];
+    }
+
+    /**
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool}  $options
+     */
+    protected function applyDurationOptions(string $format, array $options): void
+    {
+        $this->beatSeconds = 5;
+        $this->preferStock = array_key_exists('prefer_stock', $options)
+            ? (bool) $options['prefer_stock']
+            : true;
+
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            if (! empty($options['duration_seconds'])) {
+                $sec = (int) $options['duration_seconds'];
+            } elseif (! empty($options['duration_minutes'])) {
+                $sec = ((int) $options['duration_minutes']) * 60;
+            } else {
+                $sec = 10 * 60;
+            }
+            $sec = max(3 * 60, min(20 * 60, $sec));
+            $this->durationSeconds = (int) (round($sec / $this->beatSeconds) * $this->beatSeconds);
+        } else {
+            $sec = (int) ($options['duration_seconds'] ?? 15);
+            $sec = max(10, min(90, $sec));
+            $this->durationSeconds = (int) (round($sec / $this->beatSeconds) * $this->beatSeconds);
+        }
+    }
+
+    protected function beatCount(): int
+    {
+        return max(2, intdiv($this->durationSeconds, $this->beatSeconds));
+    }
+
+    protected function formatTimecode(int $startSec, int $endSec): string
+    {
+        $fmt = static fn (int $s): string => sprintf('%02d:%02d', intdiv($s, 60), $s % 60);
+
+        return $fmt($startSec).' - '.$fmt($endSec);
     }
 
     protected function coverTitle(string $topic, ?ContentIdea $idea): string

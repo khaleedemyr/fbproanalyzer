@@ -1,0 +1,24 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('content_blueprints', function (Blueprint $table) {
+            $table->unsignedInteger('duration_seconds')->nullable()->after('engine');
+            $table->unsignedTinyInteger('beat_seconds')->default(5)->after('duration_seconds');
+            $table->boolean('prefer_stock')->default(true)->after('beat_seconds');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('content_blueprints', function (Blueprint $table) {
+            $table->dropColumn(['duration_seconds', 'beat_seconds', 'prefer_stock']);
+        });
+    }
+};

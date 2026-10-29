@@ -12,11 +12,17 @@ const error = ref('');
 const topic = ref('');
 const plannedDate = ref('');
 const format = ref('reels_vo');
+const durationSeconds = ref(15);
+const durationMinutes = ref(10);
+const preferStock = ref(true);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
     reels_panjang: 'Reels Panjang',
 };
+
+const voDurationOptions = [10, 15, 20, 30, 45, 60];
+const longDurationOptions = [5, 8, 10, 12, 15];
 
 async function load() {
     loading.value = true;
@@ -40,11 +46,18 @@ async function generate() {
     message.value = '';
     error.value = '';
     try {
-        const { data } = await http.post('/blueprints/generate', {
+        const payload = {
             topic: topic.value.trim(),
             planned_date: plannedDate.value || null,
             format: format.value,
-        });
+        };
+        if (format.value === 'reels_panjang') {
+            payload.duration_minutes = Number(durationMinutes.value);
+            payload.prefer_stock = !!preferStock.value;
+        } else {
+            payload.duration_seconds = Number(durationSeconds.value);
+        }
+        const { data } = await http.post('/blueprints/generate', payload);
         message.value = data.duplicate
             ? `${data.message} Judul: "${data.data?.cover_theme || data.data?.title}".`
             : data.message;
@@ -79,7 +92,7 @@ onMounted(load);
         <div>
             <h2 class="text-2xl font-semibold text-slate-900">Blueprint Reels</h2>
             <p class="mt-1 text-sm text-slate-500">
-                Pilih format: <strong>Reels VO</strong> (15 detik, stickman cinematic) atau <strong>Reels Panjang</strong> (VOD master blueprint ~8–10 menit).
+                Durasi dipilih per generate. Beat tetap 5 detik. Video panjang tetap ada bumper; bisa utamakan stock video.
             </p>
         </div>
 
@@ -95,7 +108,7 @@ onMounted(load);
                     :class="format === 'reels_vo' ? 'bg-teal-700 text-white' : 'border border-slate-200 text-slate-700'"
                     @click="format = 'reels_vo'"
                 >
-                    Reels VO (~15 dtk)
+                    Reels VO
                 </button>
                 <button
                     type="button"
@@ -106,9 +119,29 @@ onMounted(load);
                     Reels Panjang / VOD
                 </button>
             </div>
+
+            <div class="mt-3 flex flex-wrap items-end gap-3">
+                <label v-if="format === 'reels_vo'" class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi (detik)</span>
+                    <select v-model.number="durationSeconds" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="s in voDurationOptions" :key="s" :value="s">{{ s }} detik · {{ s / 5 }} beat</option>
+                    </select>
+                </label>
+                <label v-else class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi (menit)</span>
+                    <select v-model.number="durationMinutes" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} menit · ~{{ (m * 60) / 5 }} beat</option>
+                    </select>
+                </label>
+                <label v-if="format === 'reels_panjang'" class="flex items-center gap-2 text-sm text-slate-700">
+                    <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
+                    Utamakan stock video (AI minimal)
+                </label>
+            </div>
+
             <p class="mt-2 text-xs text-slate-500">
-                <template v-if="format === 'reels_vo'">VO + CapCut + Leonardo stickman jas + bebek + motion + thumbnail + caption.</template>
-                <template v-else>Golden Hook → Bab 1–3 → Penutup, beat 5 dtk, visual AI/stok/layar hitam/bumper, opsi judul + caption.</template>
+                <template v-if="format === 'reels_vo'">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
+                <template v-else>Golden Hook → Bab → Penutup · beat 5 dtk · bumper tiap bab · visual mayoritas stock/black.</template>
             </p>
             <form class="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]" @submit.prevent="generate">
                 <input
@@ -155,6 +188,7 @@ onMounted(load);
                 <p class="mt-1 line-clamp-2 text-sm text-slate-600">{{ bp.story_concept }}</p>
                 <p class="mt-2 text-xs text-slate-500">
                     {{ bp.planned_date ? `Kalender: ${bp.planned_date}` : 'Belum dijadwalkan' }}
+                    · {{ bp.duration_seconds ? `${bp.duration_seconds}s` : '-' }}
                     · {{ (bp.scenes || []).length }} beat
                 </p>
                 <div class="mt-3 flex gap-2" @click.stop>

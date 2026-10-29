@@ -64,23 +64,32 @@ class BlueprintController extends Controller
             'planned_date' => ['nullable', 'date'],
             'format' => ['nullable', 'in:reels_vo,reels_panjang'],
             'force' => ['sometimes', 'boolean'],
+            'duration_seconds' => ['nullable', 'integer', 'min:10', 'max:1200'],
+            'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
+            'prefer_stock' => ['sometimes', 'boolean'],
         ]);
 
         $user = $request->user();
         $planned = $data['planned_date'] ?? null;
         $format = $data['format'] ?? BlueprintGeneratorService::FORMAT_REELS_VO;
         $force = (bool) ($data['force'] ?? false);
+        $options = array_filter([
+            'duration_seconds' => $data['duration_seconds'] ?? null,
+            'duration_minutes' => $data['duration_minutes'] ?? null,
+            'prefer_stock' => array_key_exists('prefer_stock', $data) ? (bool) $data['prefer_stock'] : null,
+            'force' => $force,
+        ], fn ($v) => $v !== null);
 
         if (! empty($data['content_idea_id'])) {
             $idea = ContentIdea::query()->findOrFail($data['content_idea_id']);
             abort_unless($idea->user_id === $user->id, 403);
-            $bp = $generator->generateFromIdea($user, $idea, $planned, $format, $force);
+            $bp = $generator->generateFromIdea($user, $idea, $planned, $format, $force, $options);
         } elseif (! empty($data['trend_signal_id'])) {
             $signal = TrendSignal::query()->findOrFail($data['trend_signal_id']);
-            $bp = $generator->generateFromSignal($user, $signal, $planned, $format, $force);
+            $bp = $generator->generateFromSignal($user, $signal, $planned, $format, $force, $options);
         } else {
             abort_unless(filled($data['topic'] ?? null), 422, 'topic, content_idea_id, atau trend_signal_id wajib.');
-            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format, $force);
+            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format, $force, $options);
         }
 
         $bp->load('brandKit');
