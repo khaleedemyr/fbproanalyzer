@@ -45,9 +45,17 @@ Mode Development cukup untuk akun Kea Abbasy sendiri.
 2. Upload project (kecuali `node_modules`)
 3. Document root → `public/`
 4. Set `.env` production (MySQL Hostinger, `APP_URL`, Meta secret, redirect URI)
-5. `php artisan migrate --force`
-6. Pastikan folder `storage/` dan `bootstrap/cache/` writable
-7. Cron (opsional nanti): `* * * * * php /path/to/artisan schedule:run`
+5. Wajib di `.env` production:
+   ```env
+   APP_URL=https://heng.justusku.co.id
+   SANCTUM_STATEFUL_DOMAINS=heng.justusku.co.id,www.heng.justusku.co.id
+   SESSION_DRIVER=database
+   ```
+6. `php artisan migrate --force`
+7. Pastikan folder `storage/` dan `bootstrap/cache/` writable
+8. Cron (opsional nanti): `* * * * * php /path/to/artisan schedule:run`
+
+Tidak ada user default. Klik **Daftar** di web, atau jalankan `php artisan db:seed` (test@example.com / password).
 
 Node **tidak** perlu di Hostinger.
 
