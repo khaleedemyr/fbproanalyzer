@@ -18,6 +18,20 @@ const isLong = computed(() => bp.value?.format === 'reels_panjang');
 const formatLabel = computed(() => (isLong.value ? 'Reels Panjang / VOD' : 'Reels VO'));
 const isAi = computed(() => bp.value?.engine === 'gemini');
 const engineLabel = computed(() => (isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint'));
+const beatSeconds = computed(() => bp.value?.beat_seconds || 5);
+const durationLabel = computed(() => {
+    const s = Number(bp.value?.duration_seconds) || 0;
+    if (!s) return '';
+    if (s < 60) return `${s} detik`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${m} menit ${r} detik` : `${m} menit`;
+});
+
+function sceneDurationLabel(scene) {
+    const beat = scene?.beat_seconds || beatSeconds.value;
+    return `${beat} detik`;
+}
 
 const groupedScenes = computed(() => {
     const groups = [];
@@ -110,8 +124,11 @@ onMounted(load);
                     >
                         {{ engineLabel }}
                     </span>
-                    <span v-if="bp.duration_seconds" class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
-                        {{ bp.duration_seconds }}s · beat {{ bp.beat_seconds || 5 }}s
+                    <span v-if="durationLabel" class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+                        {{ durationLabel }} · beat {{ beatSeconds }} dtk
+                    </span>
+                    <span class="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-800">
+                        Sudut: {{ bp.voice_perspective || 'Aku' }}
                     </span>
                     <span v-if="bp.prefer_stock" class="rounded bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-800">
                         Utama stock
@@ -119,6 +136,9 @@ onMounted(load);
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
+                <p v-if="bp" class="mt-1 text-xs text-slate-500">
+                    Naskah: {{ durationLabel || '-' }} total · tiap beat {{ beatSeconds }} detik · sudut pandang “{{ bp.voice_perspective || 'Aku' }}”
+                </p>
             </div>
             <div v-if="bp" class="flex flex-wrap items-end gap-2">
                 <div>
@@ -163,7 +183,10 @@ onMounted(load);
                 <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.name }}</h3>
                 <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
                     <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h4 class="font-semibold text-slate-900">{{ scene.timecode }}</h4>
+                        <h4 class="font-semibold text-slate-900">
+                            {{ scene.timecode || '—' }}
+                            <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
+                        </h4>
                         <span
                             v-if="scene.visual_type"
                             class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600"
@@ -173,7 +196,9 @@ onMounted(load);
                     </div>
                     <div class="mt-4 grid gap-4 lg:grid-cols-2">
                         <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Naskah VO</p>
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Naskah VO · sudut {{ bp.voice_perspective || 'Aku' }}
+                            </p>
                             <p class="mt-1 text-sm text-slate-800">{{ scene.vo ? `"${scene.vo}"` : '(Kosong / bumper)' }}</p>
                             <button v-if="scene.vo" class="mt-2 text-xs text-teal-700" @click="copyText(scene.vo)">Copy VO</button>
                         </div>
@@ -206,8 +231,8 @@ onMounted(load);
 
             <section class="rounded-xl border border-slate-200 bg-white p-5">
                 <h3 class="font-semibold text-slate-900">📝 Caption siap salin</h3>
-                <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-800">{{ bp.caption }}</pre>
-                <button class="mt-2 text-xs text-teal-700" @click="copyText(bp.caption)">Copy caption</button>
+                <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-800">{{ bp.caption || '(Caption kosong — generate ulang)' }}</pre>
+                <button v-if="bp.caption" class="mt-2 text-xs text-teal-700" @click="copyText(bp.caption)">Copy caption</button>
             </section>
         </template>
     </div>

@@ -63,6 +63,8 @@ async function makeBlueprint(signal, format, event) {
     error.value = '';
     try {
         const payload = { trend_signal_id: signal.id, format };
+        const voice = prompt('Sudut pandang VO? (Aku / Saya / Gue / Kamu / Kita)', 'Aku') || 'Aku';
+        payload.voice_perspective = voice.trim() || 'Aku';
         if (format === 'reels_panjang') {
             const minutes = Number(prompt('Durasi video panjang (menit)? 5–15', '10') || '10');
             payload.duration_minutes = Math.min(20, Math.max(3, minutes || 10));

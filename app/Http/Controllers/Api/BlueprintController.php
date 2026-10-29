@@ -67,6 +67,7 @@ class BlueprintController extends Controller
             'duration_seconds' => ['nullable', 'integer', 'min:10', 'max:1200'],
             'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
             'prefer_stock' => ['sometimes', 'boolean'],
+            'voice_perspective' => ['nullable', 'string', 'max:40'],
         ]);
 
         $user = $request->user();
@@ -77,6 +78,7 @@ class BlueprintController extends Controller
             'duration_seconds' => $data['duration_seconds'] ?? null,
             'duration_minutes' => $data['duration_minutes'] ?? null,
             'prefer_stock' => array_key_exists('prefer_stock', $data) ? (bool) $data['prefer_stock'] : null,
+            'voice_perspective' => $data['voice_perspective'] ?? null,
             'force' => $force,
         ], fn ($v) => $v !== null);
 

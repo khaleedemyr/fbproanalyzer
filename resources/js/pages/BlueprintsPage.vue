@@ -15,6 +15,7 @@ const format = ref('reels_vo');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
 const preferStock = ref(true);
+const voicePerspective = ref('Aku');
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -23,6 +24,15 @@ const formatLabel = {
 
 const voDurationOptions = [10, 15, 20, 30, 45, 60];
 const longDurationOptions = [5, 8, 10, 12, 15];
+const voiceOptions = ['Aku', 'Saya', 'Gue', 'Kamu', 'Kita', 'Dia', 'Orang ketiga'];
+
+function durationLabel(seconds) {
+    const s = Number(seconds) || 0;
+    if (s < 60) return `${s} detik`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${m} menit ${r} detik` : `${m} menit`;
+}
 
 async function load() {
     loading.value = true;
@@ -51,6 +61,7 @@ async function generate() {
             planned_date: plannedDate.value || null,
             format: format.value,
         };
+        payload.voice_perspective = voicePerspective.value || 'Aku';
         if (format.value === 'reels_panjang') {
             payload.duration_minutes = Number(durationMinutes.value);
             payload.prefer_stock = !!preferStock.value;
@@ -133,6 +144,12 @@ onMounted(load);
                         <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} menit · ~{{ (m * 60) / 5 }} beat</option>
                     </select>
                 </label>
+                <label class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Sudut pandang VO</span>
+                    <select v-model="voicePerspective" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="v in voiceOptions" :key="v" :value="v">{{ v }}</option>
+                    </select>
+                </label>
                 <label v-if="format === 'reels_panjang'" class="flex items-center gap-2 text-sm text-slate-700">
                     <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
                     Utamakan stock video (AI minimal)
@@ -188,8 +205,10 @@ onMounted(load);
                 <p class="mt-1 line-clamp-2 text-sm text-slate-600">{{ bp.story_concept }}</p>
                 <p class="mt-2 text-xs text-slate-500">
                     {{ bp.planned_date ? `Kalender: ${bp.planned_date}` : 'Belum dijadwalkan' }}
-                    · {{ bp.duration_seconds ? `${bp.duration_seconds}s` : '-' }}
-                    · {{ (bp.scenes || []).length }} beat
+                    · {{ bp.duration_seconds ? durationLabel(bp.duration_seconds) : '-' }}
+                    · beat {{ bp.beat_seconds || 5 }} dtk
+                    · sudut {{ bp.voice_perspective || 'Aku' }}
+                    · {{ (bp.scenes || []).length }} scene
                 </p>
                 <div class="mt-3 flex gap-2" @click.stop>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="router.push({ name: 'blueprint-detail', params: { id: bp.id } })">

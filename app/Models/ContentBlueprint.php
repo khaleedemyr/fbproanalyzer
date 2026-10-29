@@ -22,6 +22,7 @@ class ContentBlueprint extends Model
         'duration_seconds',
         'beat_seconds',
         'prefer_stock',
+        'voice_perspective',
         'scenes',
         'thumbnail_prompt',
         'caption',

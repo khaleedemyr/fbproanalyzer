@@ -71,6 +71,8 @@ async function makeBlueprint(idea, format = 'reels_vo') {
     error.value = '';
     try {
         const payload = { content_idea_id: idea.id, format };
+        const voice = prompt('Sudut pandang VO? (Aku / Saya / Gue / Kamu / Kita)', 'Aku') || 'Aku';
+        payload.voice_perspective = voice.trim() || 'Aku';
         if (format === 'reels_panjang') {
             const minutes = Number(prompt('Durasi video panjang (menit)? 5–15', '10') || '10');
             payload.duration_minutes = Math.min(20, Math.max(3, minutes || 10));

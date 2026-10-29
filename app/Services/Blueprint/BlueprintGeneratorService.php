@@ -28,6 +28,8 @@ class BlueprintGeneratorService
 
     protected bool $preferStock = true;
 
+    protected string $voicePerspective = 'Aku';
+
     public function lastEngine(): string
     {
         return $this->lastEngine;
@@ -44,7 +46,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string}  $options
      */
     public function generateFromTopic(
         User $user,
@@ -62,6 +64,9 @@ class BlueprintGeneratorService
         $format = $this->normalizeFormat($format);
         $force = $force || (bool) ($options['force'] ?? false);
         $this->applyDurationOptions($format, $options);
+        $this->voicePerspective = $this->normalizeVoicePerspective(
+            (string) ($options['voice_perspective'] ?? ($kit->voice_perspective ?: 'Aku'))
+        );
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
@@ -93,11 +98,19 @@ class BlueprintGeneratorService
         }
 
         $payload['cover_theme'] = Str::upper(trim((string) ($payload['cover_theme'] ?: $cleanTitle)));
+        $payload['scenes'] = $this->ensureSceneTimecodes($payload['scenes'] ?? []);
         $payload['thumbnail_prompt'] = $this->ensureThumbnailHasTitle(
             (string) ($payload['thumbnail_prompt'] ?? ''),
             (string) $payload['cover_theme'],
             $kit,
             $format
+        );
+        $payload['caption'] = $this->ensureCaption(
+            (string) ($payload['caption'] ?? ''),
+            $payload['scenes'],
+            (string) $payload['cover_theme'],
+            $cleanTopic,
+            $kit
         );
 
         return ContentBlueprint::query()->create([
@@ -115,6 +128,7 @@ class BlueprintGeneratorService
             'duration_seconds' => $this->durationSeconds,
             'beat_seconds' => $this->beatSeconds,
             'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? $this->preferStock : false,
+            'voice_perspective' => $this->voicePerspective,
             'scenes' => $payload['scenes'],
             'thumbnail_prompt' => $payload['thumbnail_prompt'],
             'caption' => $payload['caption'],
@@ -124,7 +138,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string}  $options
      */
     public function generateFromIdea(
         User $user,
@@ -143,7 +157,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string}  $options
      */
     public function generateFromSignal(
         User $user,
@@ -200,12 +214,17 @@ class BlueprintGeneratorService
             return $this->toLongMarkdown($bp, $kit);
         }
 
+        $voice = $bp->voice_perspective ?: ($kit->voice_perspective ?: 'Aku');
+        $durLabel = $this->humanDuration((int) ($bp->duration_seconds ?: $this->durationSeconds));
+        $beat = (int) ($bp->beat_seconds ?: 5);
+
         $lines = [
             '🎬 Blueprint Reels Cinematic (Reels VO)',
             'Tema / Judul Cover: "'.$bp->cover_theme.'"',
             'Konsep Cerita Film: '.$bp->story_concept,
+            'Durasi total: '.$durLabel.' · beat '.$beat.' dtk · Sudut pandang: "'.$voice.'"',
             '',
-            'Durasi / Detik | Naskah Voiceover (VO) (Sudut Pandang "'.$kit->voice_perspective.'") | Teks On-Screen (CapCut) | 🎨 Prompt Gambar ('.$kit->image_tool.' - '.$kit->aspect_ratio.' Cinematic) | 🎬 Prompt Animasi ('.$kit->video_tool.' / Gerakan Kamera)',
+            'Durasi / Detik | Naskah Voiceover (VO) (Sudut Pandang "'.$voice.'") | Teks On-Screen (CapCut) | 🎨 Prompt Gambar ('.$kit->image_tool.' - '.$kit->aspect_ratio.' Cinematic) | 🎬 Prompt Animasi ('.$kit->video_tool.' / Gerakan Kamera)',
             '',
         ];
 
@@ -228,11 +247,16 @@ class BlueprintGeneratorService
 
     protected function toLongMarkdown(ContentBlueprint $bp, BrandKit $kit): string
     {
+        $voice = $bp->voice_perspective ?: ($kit->voice_perspective ?: 'Aku');
+        $durLabel = $this->humanDuration((int) ($bp->duration_seconds ?: $this->durationSeconds));
+        $beat = (int) ($bp->beat_seconds ?: 5);
+
         $lines = [
             $bp->title,
             '🎬 BLUEPRINT REELS PANJANG / VOD',
             'Tema: "'.$bp->cover_theme.'"',
             'Konsep: '.$bp->story_concept,
+            'Durasi total: '.$durLabel.' · beat '.$beat.' dtk · Sudut pandang: "'.$voice.'"',
             '',
             'Durasi | Visual Level-Dewa | Motion Prompt / Keterangan | Naskah VO & Teks Layar',
             '',
@@ -401,8 +425,8 @@ Karakter visual WAJIB konsisten:
 - Style: {$kit->visual_style}
 - Aspect: {$kit->aspect_ratio}
 - Font on-screen: {$kit->on_screen_font}
-- Sudut VO: "{$kit->voice_perspective}" (bahasa Indonesia tajam, sinis cerdas, bukan ceramah)
-- Hashtag: {$kit->caption_hashtags}
+- Sudut VO WAJIB: "{$this->voicePerspective}" — semua kalimat VO pakai sudut ini (bukan ceramah orang ketiga)
+- Hashtag caption: {$kit->caption_hashtags}
 
 Tema: {$title}
 Topik: {$topic}
@@ -410,12 +434,14 @@ Hook ide (boleh diabaikan jika lemah/klise): {$hook}
 Angle: {$angle}
 {$radarBlock}
 DURASI: {$dur} detik · beat {$beat}s · tepat {$beats} scene.
+Setiap scene timecode format "MM:SS - MM:SS" (beat 1 = 00:00 - 00:05, beat 2 = 00:05 - 00:10, dst).
 
 ===== WAJIB NASKAH =====
 - Ini REELS VO PENDEK: SETIAP scene WAJIB punya "vo" terisi (1–2 kalimat).
 - DILARANG vo kosong / "" / null.
 - DILARANG visual_type "bumper" (bumper hanya untuk video panjang).
 - DILARANG scene yang cuma visual tanpa naskah.
+- Field "caption" WAJIB terisi (hook + 2–3 kalimat + CTA + hashtag). JANGAN kosong.
 
 ===== PRIORITAS #1: HOOK (detik 0–5) =====
 - Beat pertama menentukan viral. VO pembuka HARUS on-point, mengejutkan, spesifik.
@@ -434,9 +460,10 @@ ATURAN LAIN:
 - thumbnail_prompt WAJIB teks judul exact di quotes.
 
 Setiap scene HARUS punya field: timecode, visual_type, vo, on_screen, image_prompt, motion_prompt.
-vo contoh: "Aku mending keliatan biasa tapi aset nambah, daripada sok sempurna tapi dalamnya hancur."
+vo contoh (sudut "{$this->voicePerspective}"): "{$this->voicePerspective} mending keliatan biasa tapi aset nambah, daripada sok sempurna tapi dalamnya hancur."
 
-JSON SAJA, tepat {$beats} scene, SEMUA vo terisi.
+JSON SAJA dengan keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
+Tepat {$beats} scene, SEMUA vo terisi, caption WAJIB ada.
 PROMPT;
     }
 
@@ -470,8 +497,10 @@ Tema: {$title}
 Topik: {$topic}
 Hook ide (abaikan jika klise): {$hook}
 Angle: {$angle}
+Sudut VO WAJIB: "{$this->voicePerspective}" (narasi dari sudut ini)
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
+Setiap scene timecode "MM:SS - MM:SS" sesuai beat {$beat}s.
 
 ===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
 - 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik (Elon, Jobs, Churchill, Seneca, CEO, dll) relevan topik.
@@ -483,12 +512,13 @@ DILARANG KERAS pembuka:
 
 ===== NASKAH =====
 - Hanya scene visual_type "bumper" yang boleh vo kosong.
-- Semua scene stock/ai/black WAJIB punya vo + on_screen.
+- Semua scene stock/ai/black WAJIB punya vo + on_screen dari sudut "{$this->voicePerspective}".
 - Hook naskah + visual = aset utama.
+- Field "caption" WAJIB terisi (hook + ringkas isi + CTA + hashtag). JANGAN kosong.
 
 ATURAN: no metrik radar. Thumbnail WAJIB teks judul di quotes.
 Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab saja).
-JSON SAJA.
+JSON SAJA dengan keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 PROMPT;
     }
 
@@ -519,7 +549,7 @@ TXT;
         $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
         $style = $kit->visual_style ?: 'Cinematic 9:16 vertical, Jakarta neon night, high contrast';
         $font = $kit->on_screen_font ?: 'Anton';
-        $voice = $kit->voice_perspective ?: 'Aku';
+        $voice = $this->voicePerspective;
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral';
         $beat = $this->beatSeconds;
         $count = $this->beatCount();
@@ -752,8 +782,9 @@ TXT;
         }
 
         $minutes = max(1, (int) round($this->durationSeconds / 60));
+        $voice = $this->voicePerspective;
         $caption = "Sering tiba-tiba merasa bersalah padahal kamu yang sedang diserang?\n\n"
-            ."Di video ini (~{$minutes} menit) aku membongkar anatomi {$shortTopic}: merebut bingkai, membalikkan keadaan, mengunci narasi lawan.\n\n"
+            ."Di video ini (~{$minutes} menit) {$voice} membongkar anatomi {$shortTopic}: merebut bingkai, membalikkan keadaan, mengunci narasi lawan.\n\n"
             ."Tonton sampai habis. Tulis di komentar. 👇\n\n".$hashtags;
 
         return [
@@ -1025,5 +1056,104 @@ TXT;
         $char = $kit->character_visual ?: 'stickman wireframe executive in tuxedo holding a yellow rubber duck';
 
         return 'A vertical '.($kit->aspect_ratio ?: '9:16').' cinematic graphic design for a video thumbnail. '.$char.' in a bustling neon-lit Jakarta street at night. '.$titleClause.'. High contrast, urban cinematic aesthetic, professional film grain, no offensive elements.';
+    }
+
+    protected function normalizeVoicePerspective(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return 'Aku';
+        }
+
+        $aliases = [
+            'aku' => 'Aku',
+            'saya' => 'Saya',
+            'gue' => 'Gue',
+            'kamu' => 'Kamu',
+            'anda' => 'Anda',
+            'kita' => 'Kita',
+            'dia' => 'Dia',
+            'mereka' => 'Mereka',
+            'orang ketiga' => 'Orang ketiga',
+            '3rd' => 'Orang ketiga',
+            'third person' => 'Orang ketiga',
+        ];
+
+        $key = Str::lower($value);
+
+        return $aliases[$key] ?? Str::limit($value, 40, '');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $scenes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function ensureSceneTimecodes(array $scenes): array
+    {
+        $beat = max(1, $this->beatSeconds);
+        $t = 0;
+        $out = [];
+
+        foreach ($scenes as $scene) {
+            if (! is_array($scene)) {
+                continue;
+            }
+            $timecode = trim((string) ($scene['timecode'] ?? ''));
+            if ($timecode === '' || ! preg_match('/\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}/', $timecode)) {
+                $scene['timecode'] = $this->formatTimecode($t, $t + $beat);
+            }
+            $scene['beat_seconds'] = $beat;
+            $out[] = $scene;
+            $t += $beat;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $scenes
+     */
+    protected function ensureCaption(string $caption, array $scenes, string $coverTheme, string $topic, BrandKit $kit): string
+    {
+        if (trim($caption) !== '') {
+            return trim($caption);
+        }
+
+        $firstVo = '';
+        foreach ($scenes as $scene) {
+            $vo = trim((string) ($scene['vo'] ?? ''));
+            if ($vo !== '') {
+                $firstVo = $vo;
+                break;
+            }
+        }
+
+        $theme = $this->spokenTheme($coverTheme, $topic);
+        $hashtags = trim((string) ($kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral'));
+        $voice = $this->voicePerspective;
+        $dur = $this->humanDuration($this->durationSeconds);
+
+        $hook = $firstVo !== '' ? $firstVo : "{$voice} bongkar pola gelap di balik {$theme}.";
+
+        return $hook."\n\n"
+            ."Realitanya, {$theme} sering terasa biasa — sampai {$voice} sadar biayanya terlalu mahal.\n\n"
+            ."Video ~{$dur}. Setuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n"
+            .$hashtags;
+    }
+
+    protected function humanDuration(int $seconds): string
+    {
+        $seconds = max(0, $seconds);
+        if ($seconds < 60) {
+            return $seconds.' detik';
+        }
+
+        $minutes = intdiv($seconds, 60);
+        $rem = $seconds % 60;
+        if ($rem === 0) {
+            return $minutes.' menit';
+        }
+
+        return $minutes.' menit '.$rem.' detik';
     }
 }
