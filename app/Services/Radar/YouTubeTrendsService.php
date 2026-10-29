@@ -59,17 +59,19 @@ class YouTubeTrendsService
      */
     private function searchVideos(string $keyword, string $apiKey, string $since): array
     {
-        $response = Http::timeout(25)->get('https://www.googleapis.com/youtube/v3/search', [
-            'part' => 'snippet',
-            'q' => $keyword.' psikologi',
-            'type' => 'video',
-            'order' => 'viewCount',
-            'publishedAfter' => $since,
-            'maxResults' => 4,
-            'relevanceLanguage' => 'id',
-            'regionCode' => 'ID',
-            'key' => $apiKey,
-        ]);
+        $response = Http::timeout(25)
+            ->withHeaders($this->browserHeaders())
+            ->get('https://www.googleapis.com/youtube/v3/search', [
+                'part' => 'snippet',
+                'q' => $keyword.' psikologi',
+                'type' => 'video',
+                'order' => 'viewCount',
+                'publishedAfter' => $since,
+                'maxResults' => 4,
+                'relevanceLanguage' => 'id',
+                'regionCode' => 'ID',
+                'key' => $apiKey,
+            ]);
 
         if (! $response->successful()) {
             $message = data_get($response->json(), 'error.message')
@@ -80,16 +82,18 @@ class YouTubeTrendsService
         $rows = $response->json('items') ?? [];
         if ($rows === []) {
             // Fallback tanpa publishedAfter ketat
-            $response = Http::timeout(25)->get('https://www.googleapis.com/youtube/v3/search', [
-                'part' => 'snippet',
-                'q' => $keyword.' Indonesia',
-                'type' => 'video',
-                'order' => 'relevance',
-                'maxResults' => 4,
-                'relevanceLanguage' => 'id',
-                'regionCode' => 'ID',
-                'key' => $apiKey,
-            ]);
+            $response = Http::timeout(25)
+                ->withHeaders($this->browserHeaders())
+                ->get('https://www.googleapis.com/youtube/v3/search', [
+                    'part' => 'snippet',
+                    'q' => $keyword.' Indonesia',
+                    'type' => 'video',
+                    'order' => 'relevance',
+                    'maxResults' => 4,
+                    'relevanceLanguage' => 'id',
+                    'regionCode' => 'ID',
+                    'key' => $apiKey,
+                ]);
 
             if (! $response->successful()) {
                 $message = data_get($response->json(), 'error.message')
@@ -148,11 +152,13 @@ class YouTubeTrendsService
             return [];
         }
 
-        $response = Http::timeout(20)->get('https://www.googleapis.com/youtube/v3/videos', [
-            'part' => 'statistics',
-            'id' => implode(',', $videoIds),
-            'key' => $apiKey,
-        ]);
+        $response = Http::timeout(20)
+            ->withHeaders($this->browserHeaders())
+            ->get('https://www.googleapis.com/youtube/v3/videos', [
+                'part' => 'statistics',
+                'id' => implode(',', $videoIds),
+                'key' => $apiKey,
+            ]);
 
         if (! $response->successful()) {
             return [];
@@ -165,4 +171,22 @@ class YouTubeTrendsService
 
         return $map;
     }
+
+    /**
+     * @return array<string, string>
+     */
+    private function browserHeaders(): array
+    {
+        $referer = rtrim((string) config('radar.youtube_http_referer'), '/');
+        if ($referer === '') {
+            $referer = 'https://heng.justusku.co.id';
+        }
+
+        return [
+            'Referer' => $referer.'/',
+            'Origin' => $referer,
+            'User-Agent' => 'Mozilla/5.0 (compatible; FBProRadar/1.0)',
+        ];
+    }
 }
+
