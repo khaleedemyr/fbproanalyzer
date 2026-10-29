@@ -600,6 +600,9 @@ PROMPT;
         $text = trim($title) !== '' ? $title : $fallback;
         $text = preg_replace('/\s+/', ' ', $text) ?? $text;
 
+        // Buang prefix internal generator.
+        $text = preg_replace('/^(Konten FB|Versi Kea Abbasy)\s*:\s*/iu', '', $text) ?? $text;
+
         // Buang metadata radar yang sering nempel setelah em dash / bullet.
         $text = preg_replace('/\s+[—\-]\s*(Google|YouTube|pantauan|minat relatif|metric|skor).*$/iu', '', $text) ?? $text;
         $text = preg_replace('/\b(Google minat relatif|pantauan otomatis|YouTube\s*·).*$/iu', '', $text) ?? $text;
@@ -615,8 +618,12 @@ PROMPT;
             return null;
         }
 
+        if ($this->looksLikeMetaInstruction($line)) {
+            return null;
+        }
+
         $clean = $this->spokenTheme($line, $line);
-        if ($this->looksLikeRadarNoise($clean) || $this->looksLikeRadarNoise($line)) {
+        if ($this->looksLikeMetaInstruction($clean) || $this->looksLikeRadarNoise($clean) || $this->looksLikeRadarNoise($line)) {
             return null;
         }
 
@@ -626,5 +633,10 @@ PROMPT;
     protected function looksLikeRadarNoise(string $text): bool
     {
         return (bool) preg_match('/google minat|pantauan otomatis|minat relatif|youtube\s*·|\/\s*100|metric_value|viral_score/i', $text);
+    }
+
+    protected function looksLikeMetaInstruction(string $text): bool
+    {
+        return (bool) preg_match('/radar otomatis|buat sudut|tulis ulang|jangan copy|jangan dibaca|relatable \+ insight|auto radar|seed\)|sudut personal kea/i', $text);
     }
 }

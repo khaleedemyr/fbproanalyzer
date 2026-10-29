@@ -159,15 +159,17 @@ class AutoRadarService
                 continue;
             }
 
+            $keyword = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
+
             $user->contentIdeas()->create([
                 'title' => $title,
-                'angle' => 'Topik ini sedang naik di radar otomatis ('.$signal->source.'). Buat sudut personal Kea Abbasy: relatable + insight praktis.',
+                'angle' => 'Kupas sisi gelap "'.$keyword.'" yang orang jarang akui: pola kontrol, validasi, dan jebakan emosional sehari-hari.',
                 'format' => 'reel',
-                'hook' => 'Kalau kamu lagi ngerasa soal "'.$signal->keyword.'"...',
-                'topic_cluster' => Str::slug($signal->keyword, '_'),
+                'hook' => 'Kalau kamu lagi ngerasa soal "'.$keyword.'"...',
+                'topic_cluster' => Str::slug($keyword, '_'),
                 'potential_score' => min(96, (float) $signal->viral_score + 3),
                 'status' => 'queued',
-                'notes' => 'Auto radar '.$signal->source.' #'.$signal->id,
+                'notes' => 'Auto radar '.$signal->source.' #'.$signal->id.' — tulis ulang sudut personal Kea Abbasy (jangan dibaca mentah di VO).',
             ]);
             $created++;
         }
