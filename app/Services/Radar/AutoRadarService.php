@@ -32,6 +32,12 @@ class AutoRadarService
         ];
         $warnings = [];
 
+        // Hapus label lama "seed" agar tidak dobel dengan keyword_radar.
+        TrendSignal::query()
+            ->where('niche', $niche)
+            ->where('source', 'seed')
+            ->delete();
+
         $daily = $this->googleTrends->fetchDaily($region);
         $psychTrends = $this->googleTrends->filterPsychology($daily, $keywords);
 

@@ -12,15 +12,13 @@ const warnings = ref([]);
 const sourceLabel = {
     youtube: 'YouTube',
     google_trends: 'Google Trends',
-    keyword_radar: 'Google Keyword',
-    seed: 'Keyword',
+    keyword_radar: 'Google',
 };
 
 const sourceBadge = {
     youtube: 'bg-red-50 text-red-700',
     google_trends: 'bg-blue-50 text-blue-700',
     keyword_radar: 'bg-sky-50 text-sky-800',
-    seed: 'bg-slate-100 text-slate-700',
 };
 
 async function load() {

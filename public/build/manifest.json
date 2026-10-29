@@ -49,7 +49,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-z3ifiMv5.js",
+    "file": "assets/app-B7werJFu.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -69,7 +69,7 @@
     ]
   },
   "resources/js/layouts/AppLayout.vue": {
-    "file": "assets/AppLayout-C8li03b2.js",
+    "file": "assets/AppLayout-DpaN-HyE.js",
     "name": "AppLayout",
     "src": "resources/js/layouts/AppLayout.vue",
     "isDynamicEntry": true,
@@ -79,7 +79,7 @@
     ]
   },
   "resources/js/pages/AccountsPage.vue": {
-    "file": "assets/AccountsPage-Cj23t55C.js",
+    "file": "assets/AccountsPage-D06wemya.js",
     "name": "AccountsPage",
     "src": "resources/js/pages/AccountsPage.vue",
     "isDynamicEntry": true,
@@ -89,7 +89,7 @@
     ]
   },
   "resources/js/pages/DashboardPage.vue": {
-    "file": "assets/DashboardPage-BczSKPmF.js",
+    "file": "assets/DashboardPage-Cp2m02iZ.js",
     "name": "DashboardPage",
     "src": "resources/js/pages/DashboardPage.vue",
     "isDynamicEntry": true,
@@ -99,7 +99,7 @@
     ]
   },
   "resources/js/pages/IdeasPage.vue": {
-    "file": "assets/IdeasPage-BGzWPJ2O.js",
+    "file": "assets/IdeasPage-C00Q0Lch.js",
     "name": "IdeasPage",
     "src": "resources/js/pages/IdeasPage.vue",
     "isDynamicEntry": true,
@@ -109,7 +109,7 @@
     ]
   },
   "resources/js/pages/LoginPage.vue": {
-    "file": "assets/LoginPage-C5XueRdX.js",
+    "file": "assets/LoginPage-BN5SEWrT.js",
     "name": "LoginPage",
     "src": "resources/js/pages/LoginPage.vue",
     "isDynamicEntry": true,
@@ -119,7 +119,7 @@
     ]
   },
   "resources/js/pages/PostsPage.vue": {
-    "file": "assets/PostsPage-7GfB9d_1.js",
+    "file": "assets/PostsPage-BYpzB6yG.js",
     "name": "PostsPage",
     "src": "resources/js/pages/PostsPage.vue",
     "isDynamicEntry": true,
@@ -129,7 +129,7 @@
     ]
   },
   "resources/js/pages/RadarPage.vue": {
-    "file": "assets/RadarPage-BSdmDzNj.js",
+    "file": "assets/RadarPage-OHckAE4M.js",
     "name": "RadarPage",
     "src": "resources/js/pages/RadarPage.vue",
     "isDynamicEntry": true,
@@ -138,7 +138,7 @@
     ]
   },
   "resources/js/pages/RegisterPage.vue": {
-    "file": "assets/RegisterPage-Cjg0bYMN.js",
+    "file": "assets/RegisterPage--IcxowyS.js",
     "name": "RegisterPage",
     "src": "resources/js/pages/RegisterPage.vue",
     "isDynamicEntry": true,
@@ -148,7 +148,7 @@
     ]
   },
   "resources/js/pages/WatchlistPage.vue": {
-    "file": "assets/WatchlistPage-VtZEG9JU.js",
+    "file": "assets/WatchlistPage-f-HJMoMY.js",
     "name": "WatchlistPage",
     "src": "resources/js/pages/WatchlistPage.vue",
     "isDynamicEntry": true,
