@@ -343,19 +343,23 @@ class BlueprintGeneratorService
                     continue;
                 }
 
+                $scenes = array_values(array_map(
+                    fn ($s) => $this->normalizeScene(is_array($s) ? $s : []),
+                    $decoded['scenes']
+                ));
+
+                if (! $this->scenesAreUsable($scenes, $format)) {
+                    $filled = count(array_filter($scenes, fn ($s) => trim((string) ($s['vo'] ?? '')) !== ''));
+                    $errors[] = "{$model}: naskah VO kosong/invalid ({$filled}/".count($scenes).' scene berisi VO)';
+
+                    continue;
+                }
+
                 return [
                     'title' => (string) ($decoded['title'] ?? $title),
                     'cover_theme' => (string) ($decoded['cover_theme'] ?? Str::upper($title)),
                     'story_concept' => (string) ($decoded['story_concept'] ?? ''),
-                    'scenes' => array_values(array_map(fn ($s) => [
-                        'section' => (string) ($s['section'] ?? ''),
-                        'timecode' => (string) ($s['timecode'] ?? ''),
-                        'visual_type' => (string) ($s['visual_type'] ?? 'ai'),
-                        'vo' => (string) ($s['vo'] ?? ''),
-                        'on_screen' => (string) ($s['on_screen'] ?? ''),
-                        'image_prompt' => (string) ($s['image_prompt'] ?? ''),
-                        'motion_prompt' => (string) ($s['motion_prompt'] ?? ''),
-                    ], $decoded['scenes'])),
+                    'scenes' => $scenes,
                     'thumbnail_prompt' => (string) ($decoded['thumbnail_prompt'] ?? ''),
                     'caption' => (string) ($decoded['caption'] ?? ''),
                     'title_options' => array_values(array_map('strval', $decoded['title_options'] ?? [])),
@@ -407,26 +411,32 @@ Angle: {$angle}
 {$radarBlock}
 DURASI: {$dur} detik · beat {$beat}s · tepat {$beats} scene.
 
+===== WAJIB NASKAH =====
+- Ini REELS VO PENDEK: SETIAP scene WAJIB punya "vo" terisi (1–2 kalimat).
+- DILARANG vo kosong / "" / null.
+- DILARANG visual_type "bumper" (bumper hanya untuk video panjang).
+- DILARANG scene yang cuma visual tanpa naskah.
+
 ===== PRIORITAS #1: HOOK (detik 0–5) =====
 - Beat pertama menentukan viral. VO pembuka HARUS on-point, mengejutkan, spesifik.
-- Hook visual + teks on-screen + VO harus SELARAS dan saling memperkuat (pattern interrupt).
-- Teks on-screen beat 1: pendek, bold, clickbait cerdas (bukan spoiler jelek).
-- Image/motion beat 1: freeze-frame/kejutan visual yang bikin scroll berhenti.
+- Hook visual + teks on-screen + VO harus SELARAS.
+- Teks on-screen beat 1: pendek, bold, clickbait cerdas.
 
 DILARANG KERAS sebagai pembuka VO / teks:
 {$banned}
-- Jangan generic self-help. Jangan "tips 5 cara". Jangan basabasi.
 
-GAYA NASKAH YANG DIINGINKAN:
-- Mulai dari klaim tajam / kontradiksi / pengakuan gelap / fakta menyakitkan.
-- Contoh arah (JANGAN copy verbatim): "Aku mending kelihatan biasa tapi aset nambah..." / "Orang yang paling ramah di kantormu sering yang paling berbahaya."
-- Beat tengah: escalate insight. Beat akhir: punchline + CTA komentar/simpan.
+GAYA NASKAH:
+- Klaim tajam / kontradiksi / pengakuan gelap.
+- Beat tengah escalate. Beat akhir punchline + CTA.
 
 ATURAN LAIN:
-- DILARANG skor Google/YouTube/metrik radar di VO.
-- thumbnail_prompt WAJIB ada teks judul exact di quotes + visual hook kuat.
+- No metrik radar di VO.
+- thumbnail_prompt WAJIB teks judul exact di quotes.
 
-JSON SAJA, tepat {$beats} scene.
+Setiap scene HARUS punya field: timecode, visual_type, vo, on_screen, image_prompt, motion_prompt.
+vo contoh: "Aku mending keliatan biasa tapi aset nambah, daripada sok sempurna tapi dalamnya hancur."
+
+JSON SAJA, tepat {$beats} scene, SEMUA vo terisi.
 PROMPT;
     }
 
@@ -464,24 +474,20 @@ Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
 
 ===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
-- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik yang terkenal (Elon Musk, Jobs, Obama, Churchill, Seneca/sejarah, CEO, politisi, atlet, dll) yang relevan dengan topik.
-- Format: tahun/konteks singkat + situasi + konflik + twist psikologi → cliff ke topik episode.
-- Contoh gaya (jangan copy): "Tahun 2023, wartawan BBC duduk di hadapan Elon Musk..." lalu pertanyaan jebakan + pembalikan frame.
-- Tokoh & kejadian harus PLAUSIBEL / berbasis realita publik, bukan fiksi random.
-- Visual hook + teks on-screen di 3 beat pertama harus menghentikan scroll.
+- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik (Elon, Jobs, Churchill, Seneca, CEO, dll) relevan topik.
+- Format: tahun + situasi + konflik + twist → cliff ke topik.
+- 3 beat pertama WAJIB punya vo terisi (bukan bumper).
 
 DILARANG KERAS pembuka:
 {$banned}
-- Jangan mulai dengan tips. Jangan "hari ini kita bahas". Jangan basabasi.
 
-===== PRIORITAS VIRAL =====
-- Hook naskah + hook visual = aset utama.
-- Setiap bab: satu insight tajam + satu contoh kehidupan + satu kalimat yang mudah di-screenshot.
-- Bab 3: 4 senjata praktis yang actionable.
-- Penutup: stoik, CTA share/komentar, bukan summary lemah.
+===== NASKAH =====
+- Hanya scene visual_type "bumper" yang boleh vo kosong.
+- Semua scene stock/ai/black WAJIB punya vo + on_screen.
+- Hook naskah + visual = aset utama.
 
-ATURAN: no metrik radar di VO. Thumbnail WAJIB teks judul exact di quotes.
-Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab).
+ATURAN: no metrik radar. Thumbnail WAJIB teks judul di quotes.
+Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab saja).
 JSON SAJA.
 PROMPT;
     }
@@ -906,6 +912,93 @@ TXT;
     protected function looksLikeWeakHook(string $text): bool
     {
         return (bool) preg_match('/^\s*(pernahkah kamu|apakah kamu|tahukah kamu|hai\b|halo\b|guys\b|di video|hari ini aku|kali ini kita|mari kita|banyak orang tidak tahu|kalau kamu lagi ngerasa)/iu', $text);
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array{section:string,timecode:string,visual_type:string,vo:string,on_screen:string,image_prompt:string,motion_prompt:string}
+     */
+    protected function normalizeScene(array $raw): array
+    {
+        $vo = $this->firstString($raw, ['vo', 'naskah', 'naskah_vo', 'voiceover', 'voice_over', 'script', 'narasi']);
+        $onScreen = $this->firstString($raw, ['on_screen', 'teks', 'teks_on_screen', 'text', 'caption_screen', 'overlay']);
+        $image = $this->firstString($raw, ['image_prompt', 'visual', 'visual_prompt', 'prompt_gambar', 'gambar']);
+        $motion = $this->firstString($raw, ['motion_prompt', 'motion', 'animasi', 'keterangan']);
+        $type = Str::lower($this->firstString($raw, ['visual_type', 'type']) ?: 'ai');
+        if (! in_array($type, ['ai', 'stock', 'black', 'bumper'], true)) {
+            $type = 'ai';
+        }
+
+        // Reels pendek tidak boleh bumper kosong.
+        if ($type === 'bumper' && $vo === '') {
+            $type = 'ai';
+        }
+
+        return [
+            'section' => $this->firstString($raw, ['section', 'bab']) ?: 'REELS VO',
+            'timecode' => $this->firstString($raw, ['timecode', 'durasi', 'time']) ?: '',
+            'visual_type' => $type,
+            'vo' => $vo,
+            'on_screen' => $onScreen,
+            'image_prompt' => $image,
+            'motion_prompt' => $motion,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  array<int, string>  $keys
+     */
+    protected function firstString(array $raw, array $keys): string
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $raw)) {
+                continue;
+            }
+            $value = $raw[$key];
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $scenes
+     */
+    protected function scenesAreUsable(array $scenes, string $format): bool
+    {
+        if ($scenes === []) {
+            return false;
+        }
+
+        $withVo = 0;
+        $required = 0;
+        foreach ($scenes as $scene) {
+            $type = $scene['visual_type'] ?? 'ai';
+            $vo = trim((string) ($scene['vo'] ?? ''));
+            if ($format === self::FORMAT_REELS_VO) {
+                $required++;
+                if ($vo !== '') {
+                    $withVo++;
+                }
+            } elseif ($type !== 'bumper') {
+                $required++;
+                if ($vo !== '') {
+                    $withVo++;
+                }
+            }
+        }
+
+        if ($format === self::FORMAT_REELS_VO) {
+            // Minimal 80% scene harus punya naskah; beat pertama wajib.
+            $firstVo = trim((string) ($scenes[0]['vo'] ?? ''));
+
+            return $firstVo !== '' && $withVo >= max(2, (int) ceil(count($scenes) * 0.8));
+        }
+
+        return $required > 0 && $withVo >= max(5, (int) ceil($required * 0.6));
     }
 
     protected function ensureThumbnailHasTitle(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
