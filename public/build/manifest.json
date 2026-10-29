@@ -35,12 +35,12 @@
     "file": "assets/fonts-BxLh4DQe.css",
     "src": "_fonts-BxLh4DQe.css"
   },
-  "_http-COO143JM.js": {
-    "file": "assets/http-COO143JM.js",
+  "_http-0X91Dtpi.js": {
+    "file": "assets/http-0X91Dtpi.js",
     "name": "http"
   },
   "resources/css/app.css": {
-    "file": "assets/app-DhDk_5Dc.css",
+    "file": "assets/app-DgVJmNDZ.css",
     "name": "app",
     "names": [
       "app.css"
@@ -49,12 +49,12 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-B4B4Y18E.js",
+    "file": "assets/app-DcAZVZl7.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
     "imports": [
-      "_http-COO143JM.js"
+      "_http-0X91Dtpi.js"
     ],
     "dynamicImports": [
       "resources/js/pages/LoginPage.vue",
@@ -63,6 +63,7 @@
       "resources/js/pages/DashboardPage.vue",
       "resources/js/pages/RadarPage.vue",
       "resources/js/pages/AngleFinderPage.vue",
+      "resources/js/pages/AnalyticsTrackerPage.vue",
       "resources/js/pages/PostsPage.vue",
       "resources/js/pages/AccountsPage.vue",
       "resources/js/pages/WatchlistPage.vue",
@@ -74,142 +75,152 @@
     ]
   },
   "resources/js/layouts/AppLayout.vue": {
-    "file": "assets/AppLayout-DQehFHgz.js",
+    "file": "assets/AppLayout-FKVHLgXW.js",
     "name": "AppLayout",
     "src": "resources/js/layouts/AppLayout.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/AccountsPage.vue": {
-    "file": "assets/AccountsPage-BedDS-BE.js",
+    "file": "assets/AccountsPage-CaHuLX7-.js",
     "name": "AccountsPage",
     "src": "resources/js/pages/AccountsPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/AnalyticsTrackerPage.vue": {
+    "file": "assets/AnalyticsTrackerPage-Bx9lgfuX.js",
+    "name": "AnalyticsTrackerPage",
+    "src": "resources/js/pages/AnalyticsTrackerPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/AngleFinderPage.vue": {
-    "file": "assets/AngleFinderPage-vr0IclGp.js",
+    "file": "assets/AngleFinderPage-BO9cVyeD.js",
     "name": "AngleFinderPage",
     "src": "resources/js/pages/AngleFinderPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/BlueprintDetailPage.vue": {
-    "file": "assets/BlueprintDetailPage-BLXPrDsF.js",
+    "file": "assets/BlueprintDetailPage-5GnlIdrX.js",
     "name": "BlueprintDetailPage",
     "src": "resources/js/pages/BlueprintDetailPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/BlueprintsPage.vue": {
-    "file": "assets/BlueprintsPage-Be5mLpsF.js",
+    "file": "assets/BlueprintsPage-DZIv4Dio.js",
     "name": "BlueprintsPage",
     "src": "resources/js/pages/BlueprintsPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/BrandKitPage.vue": {
-    "file": "assets/BrandKitPage-qKqQsjni.js",
+    "file": "assets/BrandKitPage-ZiwgWvwU.js",
     "name": "BrandKitPage",
     "src": "resources/js/pages/BrandKitPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/CalendarPage.vue": {
-    "file": "assets/CalendarPage-bnis0Pdd.js",
+    "file": "assets/CalendarPage-BWewqUfD.js",
     "name": "CalendarPage",
     "src": "resources/js/pages/CalendarPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/DashboardPage.vue": {
-    "file": "assets/DashboardPage-C4zHYdPS.js",
+    "file": "assets/DashboardPage-DIApQIZg.js",
     "name": "DashboardPage",
     "src": "resources/js/pages/DashboardPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/IdeasPage.vue": {
-    "file": "assets/IdeasPage-Cq9G429s.js",
+    "file": "assets/IdeasPage-DM8ldXTK.js",
     "name": "IdeasPage",
     "src": "resources/js/pages/IdeasPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/LoginPage.vue": {
-    "file": "assets/LoginPage-DWgNpUue.js",
+    "file": "assets/LoginPage-CSgSei-Y.js",
     "name": "LoginPage",
     "src": "resources/js/pages/LoginPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/PostsPage.vue": {
-    "file": "assets/PostsPage-BJ7vft2q.js",
+    "file": "assets/PostsPage-C2reEssB.js",
     "name": "PostsPage",
     "src": "resources/js/pages/PostsPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/RadarPage.vue": {
-    "file": "assets/RadarPage-BRwozMO4.js",
+    "file": "assets/RadarPage-DGHcvouw.js",
     "name": "RadarPage",
     "src": "resources/js/pages/RadarPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/RegisterPage.vue": {
-    "file": "assets/RegisterPage-CdVKK3Gj.js",
+    "file": "assets/RegisterPage-F-3AbS1S.js",
     "name": "RegisterPage",
     "src": "resources/js/pages/RegisterPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   },
   "resources/js/pages/WatchlistPage.vue": {
-    "file": "assets/WatchlistPage-Dp1MGfkG.js",
+    "file": "assets/WatchlistPage-DtzxEbXo.js",
     "name": "WatchlistPage",
     "src": "resources/js/pages/WatchlistPage.vue",
     "isDynamicEntry": true,
     "imports": [
-      "_http-COO143JM.js",
+      "_http-0X91Dtpi.js",
       "resources/js/app.js"
     ]
   }

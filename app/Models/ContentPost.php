@@ -17,13 +17,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'published_at',
     'reach',
     'impressions',
+    'views',
     'likes',
     'comments',
     'shares',
     'saves',
+    'avg_watch_seconds',
+    'retention_rate',
     'engagement_rate',
     'viral_score',
     'topic_cluster',
+    'formula_key',
     'raw_insights',
 ])]
 class ContentPost extends Model
@@ -33,6 +37,8 @@ class ContentPost extends Model
         return [
             'published_at' => 'datetime',
             'raw_insights' => 'array',
+            'avg_watch_seconds' => 'decimal:2',
+            'retention_rate' => 'decimal:2',
             'engagement_rate' => 'decimal:4',
             'viral_score' => 'decimal:2',
         ];

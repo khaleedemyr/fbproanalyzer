@@ -35,6 +35,11 @@ const routes = [
                 component: () => import('../pages/AngleFinderPage.vue'),
             },
             {
+                path: 'analytics',
+                name: 'analytics',
+                component: () => import('../pages/AnalyticsTrackerPage.vue'),
+            },
+            {
                 path: 'posts',
                 name: 'posts',
                 component: () => import('../pages/PostsPage.vue'),

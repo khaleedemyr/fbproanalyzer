@@ -101,18 +101,30 @@ class MetaGraphService
 
     public function postInsights(string $postId, string $pageToken): array
     {
-        $response = Http::get($this->graphUrl('/'.$postId.'/insights'), [
-            'metric' => 'post_impressions,post_impressions_unique,post_engaged_users,post_clicks',
-            'access_token' => $pageToken,
-        ]);
-
-        if (! $response->successful()) {
-            return [];
-        }
+        $metricSets = [
+            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views,post_video_views_organic,post_video_avg_time_watched,post_video_length,post_video_view_time',
+            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_video_views,post_video_avg_time_watched',
+            'post_impressions,post_impressions_unique,post_engaged_users,post_clicks',
+        ];
 
         $metrics = [];
-        foreach ($response->json('data') ?? [] as $item) {
-            $metrics[$item['name']] = $item['values'][0]['value'] ?? 0;
+        foreach ($metricSets as $metric) {
+            $response = Http::timeout(30)->get($this->graphUrl('/'.$postId.'/insights'), [
+                'metric' => $metric,
+                'access_token' => $pageToken,
+            ]);
+
+            if (! $response->successful()) {
+                continue;
+            }
+
+            foreach ($response->json('data') ?? [] as $item) {
+                $metrics[$item['name']] = $item['values'][0]['value'] ?? 0;
+            }
+
+            if ($metrics !== []) {
+                break;
+            }
         }
 
         return $metrics;

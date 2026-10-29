@@ -60,4 +60,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(AngleFinding::class);
     }
+
+    public function analyticsSnapshots(): HasMany
+    {
+        return $this->hasMany(AnalyticsSnapshot::class);
+    }
+
+    public function trackedYoutubeVideos(): HasMany
+    {
+        return $this->hasMany(TrackedYoutubeVideo::class);
+    }
 }

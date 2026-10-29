@@ -38,10 +38,12 @@ class ViralScoreService
     public function detectFormat(?string $statusType, ?string $message): string
     {
         $statusType = strtolower((string) $statusType);
+        $message = strtolower((string) $message);
 
         return match (true) {
+            str_contains($statusType, 'reel') || str_contains($message, '#reels') => 'reel',
             str_contains($statusType, 'video') => 'video',
-            str_contains($statusType, 'photo') => 'photo',
+            str_contains($statusType, 'photo') || str_contains($statusType, 'added_photos') => 'photo',
             str_contains($statusType, 'shared_story') => 'share',
             default => filled($message) ? 'status' : 'post',
         };
@@ -54,7 +56,8 @@ class ViralScoreService
         $map = [
             'anxiety' => ['cemas', 'anxiety', 'panic', 'panik', 'khawatir'],
             'self-worth' => ['harga diri', 'insecure', 'tidak cukup', 'self worth', 'percaya diri'],
-            'relationship' => ['hubungan', 'pasangan', 'toxic', 'breakup', 'putus'],
+            'relationship' => ['hubungan', 'pasangan', 'toxic', 'breakup', 'putus', 'cinta beracun', 'gaslight'],
+            'manipulation' => ['manipulasi', 'kontrol', 'bingkai', 'frame control', 'jebakan'],
             'trauma' => ['trauma', 'luka batin', 'masa lalu'],
             'habits' => ['kebiasaan', 'disiplin', 'produktivitas', 'prokrastinasi'],
             'emotion' => ['emosi', 'marah', 'sedih', 'overthinking', 'feeling'],
@@ -68,6 +71,14 @@ class ViralScoreService
             }
         }
 
-        return null;
+        return 'umum';
+    }
+
+    public function formulaKey(?string $format, ?string $topicCluster): string
+    {
+        $format = strtolower(trim((string) ($format ?: 'post')));
+        $topic = strtolower(trim((string) ($topicCluster ?: 'umum')));
+
+        return $format.'|'.$topic;
     }
 }

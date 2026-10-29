@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AnalyticsTrackerController;
 use App\Http\Controllers\Api\AngleFinderController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BlueprintController;
@@ -54,6 +55,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('angle-finder/{angleFinding}', [AngleFinderController::class, 'show']);
     Route::post('angle-finder/{angleFinding}/save-idea', [AngleFinderController::class, 'saveIdea']);
     Route::delete('angle-finder/{angleFinding}', [AngleFinderController::class, 'destroy']);
+
+    Route::get('analytics', [AnalyticsTrackerController::class, 'index']);
+    Route::post('analytics/sync', [AnalyticsTrackerController::class, 'sync']);
+    Route::post('analytics/youtube', [AnalyticsTrackerController::class, 'trackYoutube']);
+    Route::delete('analytics/youtube/{trackedYoutubeVideo}', [AnalyticsTrackerController::class, 'destroyYoutube']);
 
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);
