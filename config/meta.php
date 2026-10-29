@@ -1,9 +1,9 @@
 <?php
 
 /**
- * Default hanya public_profile — permission bawaan Facebook Login.
- * email / pages_* harus diaktifkan dulu di Meta App (Sesuaikan use case),
- * baru diisi lewat META_SCOPES.
+ * Default hanya public_profile.
+ * App use case Page: set META_SCOPES tanpa "email" (sering Invalid Scopes).
+ * Contoh: public_profile,pages_show_list,pages_read_engagement,pages_read_user_content,read_insights
  */
 $defaultScopes = [
     'public_profile',
