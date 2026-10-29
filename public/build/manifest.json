@@ -1,0 +1,135 @@
+{
+  "_dm-sans-400-normal-BwCSEQnW.woff": {
+    "file": "assets/dm-sans-400-normal-BwCSEQnW.woff",
+    "src": "_dm-sans-400-normal-BwCSEQnW.woff"
+  },
+  "_dm-sans-400-normal-CW0RaeGs.woff2": {
+    "file": "assets/dm-sans-400-normal-CW0RaeGs.woff2",
+    "src": "_dm-sans-400-normal-CW0RaeGs.woff2"
+  },
+  "_dm-sans-500-normal-B9HHJjqV.woff2": {
+    "file": "assets/dm-sans-500-normal-B9HHJjqV.woff2",
+    "src": "_dm-sans-500-normal-B9HHJjqV.woff2"
+  },
+  "_dm-sans-500-normal-Dr3UlScf.woff": {
+    "file": "assets/dm-sans-500-normal-Dr3UlScf.woff",
+    "src": "_dm-sans-500-normal-Dr3UlScf.woff"
+  },
+  "_dm-sans-600-normal-Aqo67rzb.woff2": {
+    "file": "assets/dm-sans-600-normal-Aqo67rzb.woff2",
+    "src": "_dm-sans-600-normal-Aqo67rzb.woff2"
+  },
+  "_dm-sans-600-normal-BmdmIIQ2.woff": {
+    "file": "assets/dm-sans-600-normal-BmdmIIQ2.woff",
+    "src": "_dm-sans-600-normal-BmdmIIQ2.woff"
+  },
+  "_dm-sans-700-normal-CUSSCpQX.woff": {
+    "file": "assets/dm-sans-700-normal-CUSSCpQX.woff",
+    "src": "_dm-sans-700-normal-CUSSCpQX.woff"
+  },
+  "_dm-sans-700-normal-DvUfVpUG.woff2": {
+    "file": "assets/dm-sans-700-normal-DvUfVpUG.woff2",
+    "src": "_dm-sans-700-normal-DvUfVpUG.woff2"
+  },
+  "_fonts-BxLh4DQe.css": {
+    "file": "assets/fonts-BxLh4DQe.css",
+    "src": "_fonts-BxLh4DQe.css"
+  },
+  "resources/css/app.css": {
+    "file": "assets/app-CXkI3B3r.css",
+    "name": "app",
+    "names": [
+      "app.css"
+    ],
+    "src": "resources/css/app.css",
+    "isEntry": true
+  },
+  "resources/js/app.js": {
+    "file": "assets/app-iX6AEVMp.js",
+    "name": "app",
+    "src": "resources/js/app.js",
+    "isEntry": true,
+    "dynamicImports": [
+      "resources/js/pages/LoginPage.vue",
+      "resources/js/pages/RegisterPage.vue",
+      "resources/js/layouts/AppLayout.vue",
+      "resources/js/pages/DashboardPage.vue",
+      "resources/js/pages/PostsPage.vue",
+      "resources/js/pages/AccountsPage.vue",
+      "resources/js/pages/WatchlistPage.vue",
+      "resources/js/pages/IdeasPage.vue"
+    ]
+  },
+  "resources/js/layouts/AppLayout.vue": {
+    "file": "assets/AppLayout-DTcHqSNp.js",
+    "name": "AppLayout",
+    "src": "resources/js/layouts/AppLayout.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/AccountsPage.vue": {
+    "file": "assets/AccountsPage-CyjrkIaU.js",
+    "name": "AccountsPage",
+    "src": "resources/js/pages/AccountsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/DashboardPage.vue": {
+    "file": "assets/DashboardPage-BqlrdysQ.js",
+    "name": "DashboardPage",
+    "src": "resources/js/pages/DashboardPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/IdeasPage.vue": {
+    "file": "assets/IdeasPage-B4qGWhBo.js",
+    "name": "IdeasPage",
+    "src": "resources/js/pages/IdeasPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/LoginPage.vue": {
+    "file": "assets/LoginPage-ByCE6xwj.js",
+    "name": "LoginPage",
+    "src": "resources/js/pages/LoginPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/PostsPage.vue": {
+    "file": "assets/PostsPage-qf6_tjIQ.js",
+    "name": "PostsPage",
+    "src": "resources/js/pages/PostsPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/RegisterPage.vue": {
+    "file": "assets/RegisterPage-C4ZJGfoz.js",
+    "name": "RegisterPage",
+    "src": "resources/js/pages/RegisterPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  },
+  "resources/js/pages/WatchlistPage.vue": {
+    "file": "assets/WatchlistPage-Clj9G_a6.js",
+    "name": "WatchlistPage",
+    "src": "resources/js/pages/WatchlistPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "resources/js/app.js"
+    ]
+  }
+}
