@@ -55,15 +55,16 @@ async function runSync() {
     }
 }
 
-async function makeBlueprint(signal, event) {
+async function makeBlueprint(signal, format, event) {
     event?.preventDefault();
     event?.stopPropagation();
-    makingId.value = signal.id;
+    makingId.value = `${signal.id}:${format}`;
     message.value = '';
     error.value = '';
     try {
         const { data: res } = await http.post('/blueprints/generate', {
             trend_signal_id: signal.id,
+            format,
         });
         message.value = `Blueprint siap: ${res.data.cover_theme || res.data.title}`;
         router.push({ name: 'blueprint-detail', params: { id: res.data.id } });
@@ -148,14 +149,24 @@ onMounted(load);
                                 <span v-if="signal.metric_value"> · metric {{ signal.metric_value }}</span>
                             </p>
                             <p v-if="signal.snippet" class="mt-1 line-clamp-2 text-xs text-slate-600">{{ signal.snippet }}</p>
-                            <button
-                                type="button"
-                                class="mt-2 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 disabled:opacity-60"
-                                :disabled="makingId === signal.id"
-                                @click="makeBlueprint(signal, $event)"
-                            >
-                                {{ makingId === signal.id ? 'Membuat...' : 'Buat Blueprint' }}
-                            </button>
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 disabled:opacity-60"
+                                    :disabled="!!makingId"
+                                    @click="makeBlueprint(signal, 'reels_vo', $event)"
+                                >
+                                    {{ makingId === `${signal.id}:reels_vo` ? '...' : 'Blueprint VO' }}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                                    :disabled="!!makingId"
+                                    @click="makeBlueprint(signal, 'reels_panjang', $event)"
+                                >
+                                    {{ makingId === `${signal.id}:reels_panjang` ? '...' : 'Blueprint Panjang' }}
+                                </button>
+                            </div>
                         </div>
                         <span class="shrink-0 rounded-md bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800">{{ signal.viral_score }}</span>
                     </div>

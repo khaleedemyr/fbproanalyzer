@@ -17,9 +17,11 @@ class ContentBlueprint extends Model
         'story_concept',
         'source_topic',
         'status',
+        'format',
         'scenes',
         'thumbnail_prompt',
         'caption',
+        'title_options',
         'planned_date',
     ];
 
@@ -27,6 +29,7 @@ class ContentBlueprint extends Model
     {
         return [
             'scenes' => 'array',
+            'title_options' => 'array',
             'planned_date' => 'date',
         ];
     }

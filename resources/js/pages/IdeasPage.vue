@@ -65,13 +65,14 @@ async function removeIdea(id) {
     await load();
 }
 
-async function makeBlueprint(idea) {
-    makingId.value = idea.id;
+async function makeBlueprint(idea, format = 'reels_vo') {
+    makingId.value = `${idea.id}:${format}`;
     message.value = '';
     error.value = '';
     try {
         const { data } = await http.post('/blueprints/generate', {
             content_idea_id: idea.id,
+            format,
         });
         message.value = `Blueprint siap: ${data.data.cover_theme || data.data.title}`;
         router.push({ name: 'blueprint-detail', params: { id: data.data.id } });
@@ -134,10 +135,17 @@ onMounted(load);
                 <div class="mt-4 flex flex-wrap gap-2">
                     <button
                         class="rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 disabled:opacity-60"
-                        :disabled="makingId === idea.id"
-                        @click="makeBlueprint(idea)"
+                        :disabled="!!makingId"
+                        @click="makeBlueprint(idea, 'reels_vo')"
                     >
-                        {{ makingId === idea.id ? 'Blueprint...' : 'Buat Blueprint' }}
+                        {{ makingId === `${idea.id}:reels_vo` ? '...' : 'Blueprint VO' }}
+                    </button>
+                    <button
+                        class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                        :disabled="!!makingId"
+                        @click="makeBlueprint(idea, 'reels_panjang')"
+                    >
+                        {{ makingId === `${idea.id}:reels_panjang` ? '...' : 'Blueprint Panjang' }}
                     </button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'in_progress')">Kerjakan</button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'published')">Sudah publish</button>

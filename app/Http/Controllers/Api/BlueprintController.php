@@ -62,27 +62,33 @@ class BlueprintController extends Controller
             'content_idea_id' => ['nullable', 'exists:content_ideas,id'],
             'trend_signal_id' => ['nullable', 'exists:trend_signals,id'],
             'planned_date' => ['nullable', 'date'],
+            'format' => ['nullable', 'in:reels_vo,reels_panjang'],
         ]);
 
         $user = $request->user();
         $planned = $data['planned_date'] ?? null;
+        $format = $data['format'] ?? BlueprintGeneratorService::FORMAT_REELS_VO;
 
         if (! empty($data['content_idea_id'])) {
             $idea = ContentIdea::query()->findOrFail($data['content_idea_id']);
             abort_unless($idea->user_id === $user->id, 403);
-            $bp = $generator->generateFromIdea($user, $idea, $planned);
+            $bp = $generator->generateFromIdea($user, $idea, $planned, $format);
         } elseif (! empty($data['trend_signal_id'])) {
             $signal = TrendSignal::query()->findOrFail($data['trend_signal_id']);
-            $bp = $generator->generateFromSignal($user, $signal, $planned);
+            $bp = $generator->generateFromSignal($user, $signal, $planned, $format);
         } else {
             abort_unless(filled($data['topic'] ?? null), 422, 'topic, content_idea_id, atau trend_signal_id wajib.');
-            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned);
+            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format);
         }
 
         $bp->load('brandKit');
 
+        $label = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
+            ? 'Blueprint Reels Panjang siap.'
+            : 'Blueprint Reels VO siap.';
+
         return response()->json([
-            'message' => 'Blueprint cinematic siap.',
+            'message' => $label,
             'data' => $bp,
             'markdown' => $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($user)),
             'engine' => filled(config('blueprint.gemini_api_key')) ? 'gemini' : 'template',
@@ -98,14 +104,28 @@ class BlueprintController extends Controller
             'cover_theme' => ['nullable', 'string', 'max:180'],
             'story_concept' => ['nullable', 'string'],
             'status' => ['nullable', 'in:draft,ready,scheduled,published'],
+            'format' => ['nullable', 'in:reels_vo,reels_panjang'],
             'scenes' => ['nullable', 'array'],
             'thumbnail_prompt' => ['nullable', 'string'],
             'caption' => ['nullable', 'string'],
+            'title_options' => ['nullable', 'array'],
             'planned_date' => ['nullable', 'date'],
+            'unschedule' => ['sometimes', 'boolean'],
         ]);
 
-        if (array_key_exists('planned_date', $data) && $data['planned_date'] && empty($data['status'])) {
-            $data['status'] = 'scheduled';
+        if (! empty($data['unschedule'])) {
+            $data['planned_date'] = null;
+            $data['status'] = 'ready';
+            unset($data['unschedule']);
+        } elseif (array_key_exists('planned_date', $data)) {
+            if ($data['planned_date']) {
+                $data['status'] = $data['status'] ?? 'scheduled';
+            } elseif (empty($data['status'])) {
+                $data['status'] = 'ready';
+            }
+            unset($data['unschedule']);
+        } else {
+            unset($data['unschedule']);
         }
 
         $blueprint->update($data);
