@@ -14,7 +14,13 @@ const busyId = ref(null);
 const formatLabel = {
     reels_vo: 'VO',
     reels_panjang: 'Panjang',
+    reels_text: 'Text',
+    foto: 'Foto',
 };
+
+function timeLabel(bp) {
+    return bp.planned_time ? String(bp.planned_time).slice(0, 5) : '';
+}
 
 const monthLabel = computed(() =>
     cursor.value.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
@@ -144,6 +150,7 @@ onMounted(load);
                                 @click="router.push({ name: 'blueprint-detail', params: { id: bp.id } })"
                             >
                                 <span class="text-[9px] uppercase text-teal-700">{{ formatLabel[bp.format] || 'VO' }}</span>
+                                <span v-if="timeLabel(bp)" class="text-[9px] text-slate-600">· {{ timeLabel(bp) }}</span>
                                 ·
                                 <span
                                     class="text-[9px] uppercase"
@@ -184,7 +191,9 @@ onMounted(load);
                     <div>
                         <p class="text-sm font-medium text-slate-900">{{ bp.cover_theme || bp.title }}</p>
                         <p class="text-xs text-slate-500">
-                            {{ String(bp.planned_date).slice(0, 10) }} · {{ formatLabel[bp.format] || 'VO' }}
+                            {{ String(bp.planned_date).slice(0, 10) }}
+                            <template v-if="timeLabel(bp)"> {{ timeLabel(bp) }}</template>
+                            · {{ formatLabel[bp.format] || 'VO' }}
                         </p>
                     </div>
                     <div class="flex gap-2">

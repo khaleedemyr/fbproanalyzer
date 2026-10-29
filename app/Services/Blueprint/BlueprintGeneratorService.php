@@ -16,6 +16,18 @@ class BlueprintGeneratorService
 
     public const FORMAT_REELS_PANJANG = 'reels_panjang';
 
+    public const FORMAT_REELS_TEXT = 'reels_text';
+
+    public const FORMAT_FOTO = 'foto';
+
+    /** @var list<string> */
+    public const FORMATS = [
+        self::FORMAT_REELS_VO,
+        self::FORMAT_REELS_PANJANG,
+        self::FORMAT_REELS_TEXT,
+        self::FORMAT_FOTO,
+    ];
+
     protected string $lastEngine = 'template';
 
     protected ?string $lastWarning = null;
@@ -46,7 +58,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null}  $options
      */
     public function generateFromTopic(
         User $user,
@@ -67,6 +79,7 @@ class BlueprintGeneratorService
         $this->voicePerspective = $this->normalizeVoicePerspective(
             (string) ($options['voice_perspective'] ?? ($kit->voice_perspective ?: 'Aku'))
         );
+        $plannedTime = $this->normalizePlannedTime($options['planned_time'] ?? null);
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
@@ -92,26 +105,50 @@ class BlueprintGeneratorService
             $this->lastEngine = 'gemini';
             $payload = $gemini;
         } else {
-            $payload = $format === self::FORMAT_REELS_PANJANG
-                ? $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea)
-                : $this->buildShortTemplate($kit, $cleanTitle, $cleanTopic, $idea);
+            $payload = match ($format) {
+                self::FORMAT_REELS_PANJANG => $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea),
+                self::FORMAT_REELS_TEXT => $this->buildReelsTextTemplate($kit, $cleanTitle, $cleanTopic, $idea),
+                self::FORMAT_FOTO => $this->buildFotoTemplate($kit, $cleanTitle, $cleanTopic, $idea),
+                default => $this->buildShortTemplate($kit, $cleanTitle, $cleanTopic, $idea),
+            };
         }
 
         $payload['cover_theme'] = Str::upper(trim((string) ($payload['cover_theme'] ?: $cleanTitle)));
         $payload['scenes'] = $this->ensureSceneTimecodes($payload['scenes'] ?? []);
-        $payload['thumbnail_prompt'] = $this->ensureThumbnailHasTitle(
+        $payload['thumbnail_prompt'] = $this->ensureImagePromptHasText(
             (string) ($payload['thumbnail_prompt'] ?? ''),
             (string) $payload['cover_theme'],
             $kit,
             $format
         );
-        $payload['caption'] = $this->ensureCaption(
-            (string) ($payload['caption'] ?? ''),
-            $payload['scenes'],
-            (string) $payload['cover_theme'],
-            $cleanTopic,
-            $kit
-        );
+
+        // Untuk mode visual: pastikan scene[0].image_prompt juga sudah ada teks baked-in.
+        if ($this->isVisualPostFormat($format) && ! empty($payload['scenes'][0])) {
+            $payload['scenes'][0]['image_prompt'] = $this->ensureImagePromptHasText(
+                (string) ($payload['scenes'][0]['image_prompt'] ?? $payload['thumbnail_prompt']),
+                (string) $payload['cover_theme'],
+                $kit,
+                $format
+            );
+            if (trim((string) ($payload['thumbnail_prompt'] ?? '')) === '') {
+                $payload['thumbnail_prompt'] = $payload['scenes'][0]['image_prompt'];
+            }
+            if (empty($payload['scenes'][0]['on_screen'])) {
+                $payload['scenes'][0]['on_screen'] = (string) $payload['cover_theme'];
+            }
+        }
+
+        if ($format === self::FORMAT_FOTO) {
+            $payload['caption'] = trim((string) ($payload['caption'] ?? ''));
+        } else {
+            $payload['caption'] = $this->ensureCaption(
+                (string) ($payload['caption'] ?? ''),
+                $payload['scenes'],
+                (string) $payload['cover_theme'],
+                $cleanTopic,
+                $kit
+            );
+        }
 
         return ContentBlueprint::query()->create([
             'user_id' => $user->id,
@@ -134,6 +171,7 @@ class BlueprintGeneratorService
             'caption' => $payload['caption'],
             'title_options' => $payload['title_options'] ?? null,
             'planned_date' => $plannedDate,
+            'planned_time' => $plannedDate ? $plannedTime : null,
         ]);
     }
 
@@ -210,8 +248,15 @@ class BlueprintGeneratorService
 
     public function toMarkdown(ContentBlueprint $bp, BrandKit $kit): string
     {
-        if (($bp->format ?? self::FORMAT_REELS_VO) === self::FORMAT_REELS_PANJANG) {
+        $format = $bp->format ?? self::FORMAT_REELS_VO;
+        if ($format === self::FORMAT_REELS_PANJANG) {
             return $this->toLongMarkdown($bp, $kit);
+        }
+        if ($format === self::FORMAT_REELS_TEXT) {
+            return $this->toReelsTextMarkdown($bp, $kit);
+        }
+        if ($format === self::FORMAT_FOTO) {
+            return $this->toFotoMarkdown($bp, $kit);
         }
 
         $voice = $bp->voice_perspective ?: ($kit->voice_perspective ?: 'Aku');
@@ -241,6 +286,49 @@ class BlueprintGeneratorService
         $lines[] = '';
         $lines[] = '📝 Caption Siap Salin (Copy-Paste)';
         $lines[] = $bp->caption ?? '';
+
+        return implode("\n", $lines);
+    }
+
+    protected function toReelsTextMarkdown(ContentBlueprint $bp, BrandKit $kit): string
+    {
+        $scene = ($bp->scenes ?? [])[0] ?? [];
+        $dur = (int) ($bp->duration_seconds ?: 8);
+        $lines = [
+            '📌 Blueprint Reels Text Tempel',
+            'Tema / Teks di gambar: "'.$bp->cover_theme.'"',
+            'Konsep: '.$bp->story_concept,
+            'Durasi i2v: '.$dur.' detik',
+            '',
+            '🎨 Prompt Generate Image ('.$kit->image_tool.' — teks sudah baked-in, jangan edit lagi):',
+            (string) ($scene['image_prompt'] ?? $bp->thumbnail_prompt ?? ''),
+            '',
+            '🎬 Prompt Image → Video ('.$kit->video_tool.'):',
+            (string) ($scene['motion_prompt'] ?? ''),
+            '',
+            '📝 Caption siap salin:',
+            (string) ($bp->caption ?? ''),
+        ];
+
+        return implode("\n", $lines);
+    }
+
+    protected function toFotoMarkdown(ContentBlueprint $bp, BrandKit $kit): string
+    {
+        $scene = ($bp->scenes ?? [])[0] ?? [];
+        $lines = [
+            '🖼️ Blueprint Postingan Foto',
+            'Tema / Teks di gambar: "'.$bp->cover_theme.'"',
+            'Konsep: '.$bp->story_concept,
+            '',
+            '🎨 Prompt Generate Image ('.$kit->image_tool.' — teks sudah baked-in, jangan edit lagi):',
+            (string) ($scene['image_prompt'] ?? $bp->thumbnail_prompt ?? ''),
+        ];
+        if (trim((string) ($bp->caption ?? '')) !== '') {
+            $lines[] = '';
+            $lines[] = '📝 Caption (opsional):';
+            $lines[] = (string) $bp->caption;
+        }
 
         return implode("\n", $lines);
     }
@@ -309,9 +397,12 @@ class BlueprintGeneratorService
             return null;
         }
 
-        $prompt = $format === self::FORMAT_REELS_PANJANG
-            ? $this->geminiLongPrompt($kit, $title, $topic, $idea, $radarContext)
-            : $this->geminiShortPrompt($kit, $title, $topic, $idea, $radarContext);
+        $prompt = match ($format) {
+            self::FORMAT_REELS_PANJANG => $this->geminiLongPrompt($kit, $title, $topic, $idea, $radarContext),
+            self::FORMAT_REELS_TEXT => $this->geminiReelsTextPrompt($kit, $title, $topic, $idea, $radarContext),
+            self::FORMAT_FOTO => $this->geminiFotoPrompt($kit, $title, $topic, $idea, $radarContext),
+            default => $this->geminiShortPrompt($kit, $title, $topic, $idea, $radarContext),
+        };
 
         $models = array_values(array_unique(array_filter([
             (string) config('blueprint.gemini_model', 'gemini-3.8-flash'),
@@ -361,7 +452,28 @@ class BlueprintGeneratorService
                 }
 
                 $decoded = json_decode($jsonText, true);
-                if (! is_array($decoded) || empty($decoded['scenes']) || ! is_array($decoded['scenes'])) {
+                if (! is_array($decoded)) {
+                    $errors[] = "{$model}: JSON blueprint tidak valid";
+
+                    continue;
+                }
+
+                // Mode visual boleh kirim image_prompt di root tanpa scenes.
+                if ($this->isVisualPostFormat($format) && (empty($decoded['scenes']) || ! is_array($decoded['scenes']))) {
+                    $img = (string) ($decoded['image_prompt'] ?? $decoded['thumbnail_prompt'] ?? '');
+                    $motion = (string) ($decoded['motion_prompt'] ?? $decoded['i2v_prompt'] ?? '');
+                    $decoded['scenes'] = [[
+                        'section' => $format === self::FORMAT_FOTO ? 'POSTINGAN FOTO' : 'REELS TEXT TEMPEL',
+                        'timecode' => '',
+                        'visual_type' => 'ai',
+                        'vo' => '',
+                        'on_screen' => (string) ($decoded['cover_theme'] ?? $decoded['on_screen'] ?? Str::upper($title)),
+                        'image_prompt' => $img,
+                        'motion_prompt' => $format === self::FORMAT_FOTO ? '-' : $motion,
+                    ]];
+                }
+
+                if (empty($decoded['scenes']) || ! is_array($decoded['scenes'])) {
                     $errors[] = "{$model}: JSON blueprint tidak valid";
 
                     continue;
@@ -373,18 +485,24 @@ class BlueprintGeneratorService
                 ));
 
                 if (! $this->scenesAreUsable($scenes, $format)) {
-                    $filled = count(array_filter($scenes, fn ($s) => trim((string) ($s['vo'] ?? '')) !== ''));
-                    $errors[] = "{$model}: naskah VO kosong/invalid ({$filled}/".count($scenes).' scene berisi VO)';
+                    if ($this->isVisualPostFormat($format)) {
+                        $errors[] = "{$model}: prompt gambar/i2v kosong atau teks belum baked-in";
+                    } else {
+                        $filled = count(array_filter($scenes, fn ($s) => trim((string) ($s['vo'] ?? '')) !== ''));
+                        $errors[] = "{$model}: naskah VO kosong/invalid ({$filled}/".count($scenes).' scene berisi VO)';
+                    }
 
                     continue;
                 }
+
+                $thumb = (string) ($decoded['thumbnail_prompt'] ?? $decoded['image_prompt'] ?? ($scenes[0]['image_prompt'] ?? ''));
 
                 return [
                     'title' => (string) ($decoded['title'] ?? $title),
                     'cover_theme' => (string) ($decoded['cover_theme'] ?? Str::upper($title)),
                     'story_concept' => (string) ($decoded['story_concept'] ?? ''),
                     'scenes' => $scenes,
-                    'thumbnail_prompt' => (string) ($decoded['thumbnail_prompt'] ?? ''),
+                    'thumbnail_prompt' => $thumb,
                     'caption' => (string) ($decoded['caption'] ?? ''),
                     'title_options' => array_values(array_map('strval', $decoded['title_options'] ?? [])),
                 ];
@@ -536,6 +654,90 @@ PROMPT;
 - "Mari kita bahas..."
 - "Banyak orang tidak tahu..."
 TXT;
+    }
+
+    protected function geminiReelsTextPrompt(
+        BrandKit $kit,
+        string $title,
+        string $topic,
+        ?ContentIdea $idea,
+        string $radarContext = '',
+    ): string {
+        $hook = $idea?->hook ?: '';
+        $angle = $idea?->angle ?: '';
+        $radarBlock = $radarContext !== '' ? "Konteks riset (jangan masuk prompt):\n{$radarContext}\n" : '';
+        $dur = max(5, $this->durationSeconds);
+        $cover = Str::upper(Str::limit($title, 48, ''));
+        $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo + yellow rubber duck';
+        $banned = $this->bannedHookPhrasesForPrompt();
+
+        return <<<PROMPT
+Kamu buat blueprint REELS TEXT TEMPEL (gambar diam → image-to-video) untuk brand "{$kit->name}".
+Karakter: {$kit->character_name} — {$char}
+Style: {$kit->visual_style}
+Aspect: {$kit->aspect_ratio}
+Font teks: {$kit->on_screen_font}
+Hashtag: {$kit->caption_hashtags}
+Durasi i2v: {$dur} detik.
+
+Tema: {$title}
+Topik: {$topic}
+Hook: {$hook}
+Angle: {$angle}
+{$radarBlock}
+
+WAJIB:
+1) cover_theme = teks pendek clickbait (max ~8 kata), UPPERCASE. Contoh: "{$cover}"
+2) image_prompt = 1 prompt Leonardo/Flux lengkap. TEKS JUDUL HARUS sudah di dalam gambar: tulis exact the text "JUDUL" in large bold glowing yellow Anton-style font. User TIDAK akan edit teks lagi.
+3) motion_prompt = prompt image-to-video (Kling/Runway/Luma): gerakan kamera halus, {$dur}s, jangan ubah/hapus teks di gambar.
+4) caption = caption FB siap salin + hashtag.
+5) 1 scene saja di scenes[] dengan image_prompt + motion_prompt + on_screen = cover_theme.
+
+DILARANG teks klise: {$banned}
+
+JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
+thumbnail_prompt boleh sama dengan image_prompt.
+PROMPT;
+    }
+
+    protected function geminiFotoPrompt(
+        BrandKit $kit,
+        string $title,
+        string $topic,
+        ?ContentIdea $idea,
+        string $radarContext = '',
+    ): string {
+        $hook = $idea?->hook ?: '';
+        $angle = $idea?->angle ?: '';
+        $radarBlock = $radarContext !== '' ? "Konteks riset (jangan masuk prompt):\n{$radarContext}\n" : '';
+        $cover = Str::upper(Str::limit($title, 48, ''));
+        $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo + yellow rubber duck';
+        $banned = $this->bannedHookPhrasesForPrompt();
+
+        return <<<PROMPT
+Kamu buat blueprint POSTINGAN FOTO (single image) untuk brand "{$kit->name}".
+Karakter: {$kit->character_name} — {$char}
+Style: {$kit->visual_style}
+Aspect: {$kit->aspect_ratio} (boleh 4:5 atau 1:1 jika lebih cocok feed, default {$kit->aspect_ratio})
+Font teks: {$kit->on_screen_font}
+
+Tema: {$title}
+Topik: {$topic}
+Hook: {$hook}
+Angle: {$angle}
+{$radarBlock}
+
+WAJIB:
+1) cover_theme = teks pendek di foto (max ~8 kata), UPPERCASE. Contoh: "{$cover}"
+2) image_prompt = 1 prompt generate image lengkap. TEKS JUDUL HARUS baked-in: the text "JUDUL" boldly displayed. User TIDAK edit teks lagi.
+3) motion_prompt = "-" (foto, bukan video).
+4) caption boleh kosong atau singkat (opsional).
+5) 1 scene saja.
+
+DILARANG: {$banned}
+
+JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
+PROMPT;
     }
 
     /**
@@ -804,6 +1006,77 @@ TXT;
     }
 
     /**
+     * @return array{title:string,cover_theme:string,story_concept:string,scenes:array<int,array<string,mixed>>,thumbnail_prompt:string,caption:string,title_options:array<int,string>}
+     */
+    protected function buildReelsTextTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
+    {
+        $theme = $this->spokenTheme($title, $topic);
+        $cover = Str::upper(Str::limit($theme ?: 'TEKS VIRAL', 48, ''));
+        $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
+        $style = $kit->visual_style ?: 'Cinematic 9:16 vertical, Jakarta neon night, high contrast';
+        $hashtags = $kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral';
+        $dur = max(5, $this->durationSeconds);
+        $hook = $this->spokenLine($idea?->hook);
+        $captionHook = $hook ?: "{$this->voicePerspective} sadar: {$theme} bukan kebetulan — itu pola.";
+
+        $image = "A vertical {$kit->aspect_ratio} cinematic still frame for a text-overlay Instagram/Facebook Reels. {$char} standing in a crowded neon-lit Jakarta street at night, high contrast rim light. {$style}. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow. Clean composition, readable typography, film grain, no offensive elements. --ar 9:16";
+
+        $motion = "Image to video, {$dur} seconds. Slow cinematic push-in toward the stickman character while neon bokeh drifts softly. Keep the on-image text \"{$cover}\" perfectly sharp, locked, and fully readable — do not warp, crop, or remove the title. Subtle parallax, natural handheld micro-motion, cinematic color grade.";
+
+        return [
+            'title' => Str::limit($theme, 120, ''),
+            'cover_theme' => $cover,
+            'story_concept' => "Reels text tempel {$dur}s: generate image (teks baked-in) → image-to-video → caption.",
+            'scenes' => [[
+                'section' => 'REELS TEXT TEMPEL',
+                'timecode' => $this->formatTimecode(0, $dur),
+                'visual_type' => 'ai',
+                'vo' => '',
+                'on_screen' => $cover,
+                'image_prompt' => $image,
+                'motion_prompt' => $motion,
+                'beat_seconds' => $dur,
+            ]],
+            'thumbnail_prompt' => $image,
+            'caption' => $captionHook."\n\nSimpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags,
+            'title_options' => [],
+        ];
+    }
+
+    /**
+     * @return array{title:string,cover_theme:string,story_concept:string,scenes:array<int,array<string,mixed>>,thumbnail_prompt:string,caption:string,title_options:array<int,string>}
+     */
+    protected function buildFotoTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
+    {
+        $theme = $this->spokenTheme($title, $topic);
+        $cover = Str::upper(Str::limit($theme ?: 'TEKS VIRAL', 48, ''));
+        $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
+        $style = $kit->visual_style ?: 'Cinematic high-contrast urban night';
+        $ratio = $kit->aspect_ratio ?: '4:5';
+
+        $image = "A vertical {$ratio} cinematic Facebook/Instagram feed photo. {$char} in a moody neon Jakarta alley, sharp focus, editorial lighting. {$style}. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow. Typography must be perfectly readable — no extra editing needed. Ultra sharp, feed-ready, film grain, no offensive elements.";
+
+        return [
+            'title' => Str::limit($theme, 120, ''),
+            'cover_theme' => $cover,
+            'story_concept' => 'Postingan foto: 1 prompt generate image dengan teks judul sudah baked-in.',
+            'scenes' => [[
+                'section' => 'POSTINGAN FOTO',
+                'timecode' => '',
+                'visual_type' => 'ai',
+                'vo' => '',
+                'on_screen' => $cover,
+                'image_prompt' => $image,
+                'motion_prompt' => '-',
+                'beat_seconds' => 0,
+            ]],
+            'thumbnail_prompt' => $image,
+            'caption' => '',
+            'title_options' => [],
+        ];
+    }
+
+    /**
      * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool}  $options
      */
     protected function applyDurationOptions(string $format, array $options): void
@@ -812,6 +1085,21 @@ TXT;
         $this->preferStock = array_key_exists('prefer_stock', $options)
             ? (bool) $options['prefer_stock']
             : true;
+
+        if ($format === self::FORMAT_FOTO) {
+            $this->durationSeconds = 0;
+            $this->beatSeconds = 0;
+
+            return;
+        }
+
+        if ($format === self::FORMAT_REELS_TEXT) {
+            $sec = (int) ($options['duration_seconds'] ?? 8);
+            $this->durationSeconds = max(5, min(30, $sec));
+            $this->beatSeconds = $this->durationSeconds;
+
+            return;
+        }
 
         if ($format === self::FORMAT_REELS_PANJANG) {
             if (! empty($options['duration_seconds'])) {
@@ -832,6 +1120,10 @@ TXT;
 
     protected function beatCount(): int
     {
+        if ($this->beatSeconds <= 0) {
+            return 1;
+        }
+
         return max(2, intdiv($this->durationSeconds, $this->beatSeconds));
     }
 
@@ -853,9 +1145,30 @@ TXT;
 
     protected function normalizeFormat(string $format): string
     {
-        return in_array($format, [self::FORMAT_REELS_VO, self::FORMAT_REELS_PANJANG], true)
+        return in_array($format, self::FORMATS, true)
             ? $format
             : self::FORMAT_REELS_VO;
+    }
+
+    protected function isVisualPostFormat(string $format): bool
+    {
+        return in_array($format, [self::FORMAT_REELS_TEXT, self::FORMAT_FOTO], true);
+    }
+
+    protected function normalizePlannedTime(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $raw = trim((string) $value);
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $raw, $m)) {
+            $h = max(0, min(23, (int) $m[1]));
+            $i = max(0, min(59, (int) $m[2]));
+
+            return sprintf('%02d:%02d:00', $h, $i);
+        }
+
+        return null;
     }
 
     protected function cleanTopic(string $topic, ?ContentIdea $idea, ?TrendSignal $signal): string
@@ -1004,6 +1317,19 @@ TXT;
             return false;
         }
 
+        if ($format === self::FORMAT_FOTO) {
+            $img = trim((string) ($scenes[0]['image_prompt'] ?? ''));
+
+            return $img !== '';
+        }
+
+        if ($format === self::FORMAT_REELS_TEXT) {
+            $img = trim((string) ($scenes[0]['image_prompt'] ?? ''));
+            $motion = trim((string) ($scenes[0]['motion_prompt'] ?? ''));
+
+            return $img !== '' && $motion !== '' && $motion !== '-';
+        }
+
         $withVo = 0;
         $required = 0;
         foreach ($scenes as $scene) {
@@ -1032,6 +1358,11 @@ TXT;
         return $required > 0 && $withVo >= max(5, (int) ceil($required * 0.6));
     }
 
+    protected function ensureImagePromptHasText(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
+    {
+        return $this->ensureThumbnailHasTitle($prompt, $coverTheme, $kit, $format);
+    }
+
     protected function ensureThumbnailHasTitle(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
     {
         $cover = trim($coverTheme) !== '' ? Str::upper($coverTheme) : 'JUDUL COVER';
@@ -1051,6 +1382,20 @@ TXT;
 
         if ($format === self::FORMAT_REELS_PANJANG) {
             return 'A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. '.$titleClause.'. Professional film grain, high contrast, no offensive elements.';
+        }
+
+        if ($format === self::FORMAT_FOTO) {
+            $char = $kit->character_visual ?: 'stickman wireframe executive in tuxedo holding a yellow rubber duck';
+            $style = $kit->visual_style ?: 'Cinematic high contrast urban night';
+
+            return 'A vertical '.($kit->aspect_ratio ?: '4:5').' cinematic social media photo. '.$char.'. '.$style.'. '.$titleClause.'. Ultra sharp, feed-ready, no offensive elements.';
+        }
+
+        if ($format === self::FORMAT_REELS_TEXT) {
+            $char = $kit->character_visual ?: 'stickman wireframe executive in tuxedo holding a yellow rubber duck';
+            $style = $kit->visual_style ?: 'Cinematic 9:16 vertical, Jakarta neon night';
+
+            return 'A vertical '.($kit->aspect_ratio ?: '9:16').' cinematic still frame for text-overlay reels. '.$char.' in a bustling neon-lit Jakarta street at night. '.$style.'. '.$titleClause.'. High contrast, clean negative space for title, film grain.';
         }
 
         $char = $kit->character_visual ?: 'stickman wireframe executive in tuxedo holding a yellow rubber duck';
@@ -1090,6 +1435,19 @@ TXT;
      */
     protected function ensureSceneTimecodes(array $scenes): array
     {
+        if ($this->beatSeconds <= 0) {
+            $out = [];
+            foreach ($scenes as $scene) {
+                if (! is_array($scene)) {
+                    continue;
+                }
+                $scene['beat_seconds'] = 0;
+                $out[] = $scene;
+            }
+
+            return $out;
+        }
+
         $beat = max(1, $this->beatSeconds);
         $t = 0;
         $out = [];

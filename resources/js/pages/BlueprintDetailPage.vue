@@ -12,10 +12,23 @@ const markdown = ref('');
 const message = ref('');
 const error = ref('');
 const plannedDate = ref('');
+const plannedTime = ref('09:00');
 
 const scenes = computed(() => bp.value?.scenes || []);
-const isLong = computed(() => bp.value?.format === 'reels_panjang');
-const formatLabel = computed(() => (isLong.value ? 'Reels Panjang / VOD' : 'Reels VO'));
+const format = computed(() => bp.value?.format || 'reels_vo');
+const isLong = computed(() => format.value === 'reels_panjang');
+const isText = computed(() => format.value === 'reels_text');
+const isFoto = computed(() => format.value === 'foto');
+const isVisual = computed(() => isText.value || isFoto.value);
+const primaryScene = computed(() => scenes.value[0] || {});
+
+const formatLabel = computed(() => ({
+    reels_vo: 'Reels VO',
+    reels_panjang: 'Reels Panjang / VOD',
+    reels_text: 'Reels Text Tempel',
+    foto: 'Postingan Foto',
+})[format.value] || 'Reels VO');
+
 const isAi = computed(() => bp.value?.engine === 'gemini');
 const engineLabel = computed(() => (isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint'));
 const beatSeconds = computed(() => bp.value?.beat_seconds || 5);
@@ -30,6 +43,7 @@ const durationLabel = computed(() => {
 
 function sceneDurationLabel(scene) {
     const beat = scene?.beat_seconds || beatSeconds.value;
+    if (!beat) return 'foto';
     return `${beat} detik`;
 }
 
@@ -37,7 +51,7 @@ const groupedScenes = computed(() => {
     const groups = [];
     let current = null;
     for (const scene of scenes.value) {
-        const section = scene.section || (isLong.value ? 'Blueprint' : 'REELS VO');
+        const section = scene.section || (isLong.value ? 'Blueprint' : isVisual.value ? formatLabel.value : 'REELS VO');
         if (!current || current.name !== section) {
             current = { name: section, scenes: [] };
             groups.push(current);
@@ -55,6 +69,7 @@ async function load() {
         bp.value = data.data;
         markdown.value = data.markdown || '';
         plannedDate.value = data.data.planned_date ? String(data.data.planned_date).slice(0, 10) : '';
+        plannedTime.value = data.data.planned_time ? String(data.data.planned_time).slice(0, 5) : '09:00';
     } catch (e) {
         error.value = e.response?.data?.message || 'Blueprint tidak ditemukan.';
     } finally {
@@ -68,10 +83,13 @@ async function saveSchedule() {
     try {
         const { data } = await http.patch(`/blueprints/${bp.value.id}`, {
             planned_date: plannedDate.value || null,
+            planned_time: plannedDate.value ? (plannedTime.value || null) : null,
             status: plannedDate.value ? 'scheduled' : 'ready',
         });
         bp.value = data.data;
-        message.value = plannedDate.value ? 'Masuk kalender konten.' : 'Jadwal dihapus.';
+        message.value = plannedDate.value
+            ? `Masuk kalender: ${plannedDate.value}${plannedTime.value ? ' ' + plannedTime.value : ''}`
+            : 'Jadwal dihapus.';
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal simpan jadwal.';
     } finally {
@@ -85,6 +103,7 @@ async function unschedule() {
         const { data } = await http.patch(`/blueprints/${bp.value.id}`, { unschedule: true });
         bp.value = data.data;
         plannedDate.value = '';
+        plannedTime.value = '09:00';
         message.value = 'Dihapus dari kalender.';
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal lepas kalender.';
@@ -125,9 +144,10 @@ onMounted(load);
                         {{ engineLabel }}
                     </span>
                     <span v-if="durationLabel" class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
-                        {{ durationLabel }} · beat {{ beatSeconds }} dtk
+                        <template v-if="isText">i2v {{ durationLabel }}</template>
+                        <template v-else>{{ durationLabel }} · beat {{ beatSeconds }} dtk</template>
                     </span>
-                    <span class="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-800">
+                    <span v-if="!isVisual" class="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-800">
                         Sudut: {{ bp.voice_perspective || 'Aku' }}
                     </span>
                     <span v-if="bp.prefer_stock" class="rounded bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-800">
@@ -136,14 +156,24 @@ onMounted(load);
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
-                <p v-if="bp" class="mt-1 text-xs text-slate-500">
+                <p v-if="bp && !isVisual" class="mt-1 text-xs text-slate-500">
                     Naskah: {{ durationLabel || '-' }} total · tiap beat {{ beatSeconds }} detik · sudut pandang “{{ bp.voice_perspective || 'Aku' }}”
+                </p>
+                <p v-else-if="bp && isText" class="mt-1 text-xs text-slate-500">
+                    Teks di gambar sudah baked-in · generate image → image-to-video {{ durationLabel }} · caption
+                </p>
+                <p v-else-if="bp && isFoto" class="mt-1 text-xs text-slate-500">
+                    Teks di gambar sudah baked-in · cukup generate image, tanpa edit teks
                 </p>
             </div>
             <div v-if="bp" class="flex flex-wrap items-end gap-2">
                 <div>
-                    <label class="block text-[11px] font-semibold uppercase text-slate-500">Kalender</label>
+                    <label class="block text-[11px] font-semibold uppercase text-slate-500">Tanggal</label>
                     <input v-model="plannedDate" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                    <label class="block text-[11px] font-semibold uppercase text-slate-500">Jam</label>
+                    <input v-model="plannedTime" type="time" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" :disabled="!plannedDate" />
                 </div>
                 <button
                     type="button"
@@ -179,61 +209,87 @@ onMounted(load);
                 </ol>
             </section>
 
-            <div v-for="group in groupedScenes" :key="group.name" class="space-y-3">
-                <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.name }}</h3>
-                <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <h4 class="font-semibold text-slate-900">
-                            {{ scene.timecode || '—' }}
-                            <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
-                        </h4>
-                        <span
-                            v-if="scene.visual_type"
-                            class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600"
-                        >
-                            {{ scene.visual_type }}
-                        </span>
-                    </div>
-                    <div class="mt-4 grid gap-4 lg:grid-cols-2">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                Naskah VO · sudut {{ bp.voice_perspective || 'Aku' }}
-                            </p>
-                            <p class="mt-1 text-sm text-slate-800">{{ scene.vo ? `"${scene.vo}"` : '(Kosong / bumper)' }}</p>
-                            <button v-if="scene.vo" class="mt-2 text-xs text-teal-700" @click="copyText(scene.vo)">Copy VO</button>
-                        </div>
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Teks On-Screen</p>
-                            <pre class="mt-1 whitespace-pre-wrap text-sm text-slate-800">{{ scene.on_screen }}</pre>
-                            <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.on_screen)">Copy teks</button>
-                        </div>
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                {{ isLong ? 'Visual Level-Dewa' : '🎨 Prompt Gambar' }}
-                            </p>
-                            <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.image_prompt }}</p>
-                            <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.image_prompt)">Copy visual</button>
-                        </div>
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">🎬 Motion / Keterangan</p>
-                            <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.motion_prompt }}</p>
-                            <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.motion_prompt)">Copy motion</button>
-                        </div>
-                    </div>
+            <!-- Mode visual: layout sederhana -->
+            <template v-if="isVisual">
+                <section class="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-900">🎨 Prompt Generate Image</h3>
+                    <p class="mt-1 text-xs text-slate-500">Teks “{{ bp.cover_theme }}” sudah di dalam prompt — generate langsung, tanpa edit teks.</p>
+                    <p class="mt-2 text-xs leading-relaxed text-slate-700">{{ primaryScene.image_prompt || bp.thumbnail_prompt }}</p>
+                    <button class="mt-2 text-xs text-teal-700" @click="copyText(primaryScene.image_prompt || bp.thumbnail_prompt)">Copy prompt image</button>
                 </section>
-            </div>
 
-            <section class="rounded-xl border border-slate-200 bg-white p-5">
-                <h3 class="font-semibold text-slate-900">🎨 Prompt Thumbnail</h3>
-                <p class="mt-2 text-xs leading-relaxed text-slate-700">{{ bp.thumbnail_prompt }}</p>
-                <button class="mt-2 text-xs text-teal-700" @click="copyText(bp.thumbnail_prompt)">Copy thumbnail</button>
-            </section>
+                <section v-if="isText" class="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-900">🎬 Prompt Image → Video</h3>
+                    <p class="mt-1 text-xs text-slate-500">Durasi {{ durationLabel || '—' }} · jangan biarkan teks di gambar bergeser/hilang.</p>
+                    <p class="mt-2 text-xs leading-relaxed text-slate-700">{{ primaryScene.motion_prompt }}</p>
+                    <button class="mt-2 text-xs text-teal-700" @click="copyText(primaryScene.motion_prompt)">Copy i2v prompt</button>
+                </section>
 
-            <section class="rounded-xl border border-slate-200 bg-white p-5">
-                <h3 class="font-semibold text-slate-900">📝 Caption siap salin</h3>
-                <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-800">{{ bp.caption || '(Caption kosong — generate ulang)' }}</pre>
-                <button v-if="bp.caption" class="mt-2 text-xs text-teal-700" @click="copyText(bp.caption)">Copy caption</button>
-            </section>
+                <section v-if="isText || bp.caption" class="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-900">📝 Caption siap salin</h3>
+                    <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-800">{{ bp.caption || '(Caption kosong)' }}</pre>
+                    <button v-if="bp.caption" class="mt-2 text-xs text-teal-700" @click="copyText(bp.caption)">Copy caption</button>
+                </section>
+            </template>
+
+            <!-- Mode VO / Panjang -->
+            <template v-else>
+                <div v-for="group in groupedScenes" :key="group.name" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.name }}</h3>
+                    <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h4 class="font-semibold text-slate-900">
+                                {{ scene.timecode || '—' }}
+                                <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
+                            </h4>
+                            <span
+                                v-if="scene.visual_type"
+                                class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600"
+                            >
+                                {{ scene.visual_type }}
+                            </span>
+                        </div>
+                        <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Naskah VO · sudut {{ bp.voice_perspective || 'Aku' }}
+                                </p>
+                                <p class="mt-1 text-sm text-slate-800">{{ scene.vo ? `"${scene.vo}"` : '(Kosong / bumper)' }}</p>
+                                <button v-if="scene.vo" class="mt-2 text-xs text-teal-700" @click="copyText(scene.vo)">Copy VO</button>
+                            </div>
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Teks On-Screen</p>
+                                <pre class="mt-1 whitespace-pre-wrap text-sm text-slate-800">{{ scene.on_screen }}</pre>
+                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.on_screen)">Copy teks</button>
+                            </div>
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    {{ isLong ? 'Visual Level-Dewa' : '🎨 Prompt Gambar' }}
+                                </p>
+                                <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.image_prompt }}</p>
+                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.image_prompt)">Copy visual</button>
+                            </div>
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">🎬 Motion / Keterangan</p>
+                                <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.motion_prompt }}</p>
+                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.motion_prompt)">Copy motion</button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-900">🎨 Prompt Thumbnail</h3>
+                    <p class="mt-2 text-xs leading-relaxed text-slate-700">{{ bp.thumbnail_prompt }}</p>
+                    <button class="mt-2 text-xs text-teal-700" @click="copyText(bp.thumbnail_prompt)">Copy thumbnail</button>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-5">
+                    <h3 class="font-semibold text-slate-900">📝 Caption siap salin</h3>
+                    <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-800">{{ bp.caption || '(Caption kosong — generate ulang)' }}</pre>
+                    <button v-if="bp.caption" class="mt-2 text-xs text-teal-700" @click="copyText(bp.caption)">Copy caption</button>
+                </section>
+            </template>
         </template>
     </div>
 </template>

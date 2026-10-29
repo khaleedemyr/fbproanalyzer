@@ -28,6 +28,7 @@ class ContentBlueprint extends Model
         'caption',
         'title_options',
         'planned_date',
+        'planned_time',
     ];
 
     protected function casts(): array
@@ -40,6 +41,16 @@ class ContentBlueprint extends Model
             'duration_seconds' => 'integer',
             'beat_seconds' => 'integer',
         ];
+    }
+
+    public function plannedTimeHm(): ?string
+    {
+        $t = $this->planned_time;
+        if ($t === null || $t === '') {
+            return null;
+        }
+
+        return substr((string) $t, 0, 5);
     }
 
     public function user(): BelongsTo

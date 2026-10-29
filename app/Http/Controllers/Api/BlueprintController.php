@@ -34,7 +34,9 @@ class BlueprintController extends Controller
             if ($request->filled('to')) {
                 $query->whereDate('planned_date', '<=', $request->date('to'));
             }
-            $query->reorder()->orderBy('planned_date');
+            $query->reorder()
+                ->orderBy('planned_date')
+                ->orderBy('planned_time');
         }
 
         return response()->json(['data' => $query->limit(100)->get()]);
@@ -57,14 +59,17 @@ class BlueprintController extends Controller
 
     public function generate(Request $request, BlueprintGeneratorService $generator): JsonResponse
     {
+        $formatList = implode(',', BlueprintGeneratorService::FORMATS);
+
         $data = $request->validate([
             'topic' => ['nullable', 'string', 'max:500'],
             'content_idea_id' => ['nullable', 'exists:content_ideas,id'],
             'trend_signal_id' => ['nullable', 'exists:trend_signals,id'],
             'planned_date' => ['nullable', 'date'],
-            'format' => ['nullable', 'in:reels_vo,reels_panjang'],
+            'planned_time' => ['nullable', 'date_format:H:i'],
+            'format' => ['nullable', 'in:'.$formatList],
             'force' => ['sometimes', 'boolean'],
-            'duration_seconds' => ['nullable', 'integer', 'min:10', 'max:1200'],
+            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:1200'],
             'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
@@ -79,6 +84,7 @@ class BlueprintController extends Controller
             'duration_minutes' => $data['duration_minutes'] ?? null,
             'prefer_stock' => array_key_exists('prefer_stock', $data) ? (bool) $data['prefer_stock'] : null,
             'voice_perspective' => $data['voice_perspective'] ?? null,
+            'planned_time' => $data['planned_time'] ?? null,
             'force' => $force,
         ], fn ($v) => $v !== null);
 
@@ -103,9 +109,12 @@ class BlueprintController extends Controller
         if ($duplicate) {
             $label = 'Judul blueprint sudah ada — dibuka yang lama (tema bebas, judul tidak diduplikasi).';
         } else {
-            $label = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
-                ? 'Blueprint Reels Panjang siap.'
-                : 'Blueprint Reels VO siap.';
+            $label = match ($format) {
+                BlueprintGeneratorService::FORMAT_REELS_PANJANG => 'Blueprint Reels Panjang siap.',
+                BlueprintGeneratorService::FORMAT_REELS_TEXT => 'Blueprint Reels Text Tempel siap.',
+                BlueprintGeneratorService::FORMAT_FOTO => 'Blueprint Postingan Foto siap.',
+                default => 'Blueprint Reels VO siap.',
+            };
             $label .= $engine === 'gemini' ? ' (AI Gemini)' : ' (template)';
         }
 
@@ -124,32 +133,47 @@ class BlueprintController extends Controller
     {
         abort_unless($blueprint->user_id === $request->user()->id, 403);
 
+        $formatList = implode(',', BlueprintGeneratorService::FORMATS);
+
         $data = $request->validate([
             'title' => ['sometimes', 'string', 'max:180'],
             'cover_theme' => ['nullable', 'string', 'max:180'],
             'story_concept' => ['nullable', 'string'],
             'status' => ['nullable', 'in:draft,ready,scheduled,published'],
-            'format' => ['nullable', 'in:reels_vo,reels_panjang'],
+            'format' => ['nullable', 'in:'.$formatList],
             'scenes' => ['nullable', 'array'],
             'thumbnail_prompt' => ['nullable', 'string'],
             'caption' => ['nullable', 'string'],
             'title_options' => ['nullable', 'array'],
             'planned_date' => ['nullable', 'date'],
+            'planned_time' => ['nullable', 'date_format:H:i'],
             'unschedule' => ['sometimes', 'boolean'],
         ]);
 
         if (! empty($data['unschedule'])) {
             $data['planned_date'] = null;
+            $data['planned_time'] = null;
             $data['status'] = 'ready';
             unset($data['unschedule']);
         } elseif (array_key_exists('planned_date', $data)) {
             if ($data['planned_date']) {
                 $data['status'] = $data['status'] ?? 'scheduled';
-            } elseif (empty($data['status'])) {
-                $data['status'] = 'ready';
+                if (array_key_exists('planned_time', $data) && $data['planned_time']) {
+                    $data['planned_time'] = strlen($data['planned_time']) === 5
+                        ? $data['planned_time'].':00'
+                        : $data['planned_time'];
+                }
+            } else {
+                $data['planned_time'] = null;
+                if (empty($data['status'])) {
+                    $data['status'] = 'ready';
+                }
             }
             unset($data['unschedule']);
         } else {
+            if (array_key_exists('planned_time', $data) && $data['planned_time'] && strlen((string) $data['planned_time']) === 5) {
+                $data['planned_time'] = $data['planned_time'].':00';
+            }
             unset($data['unschedule']);
         }
 

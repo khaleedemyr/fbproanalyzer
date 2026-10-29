@@ -71,13 +71,18 @@ async function makeBlueprint(idea, format = 'reels_vo') {
     error.value = '';
     try {
         const payload = { content_idea_id: idea.id, format };
-        const voice = prompt('Sudut pandang VO? (Aku / Saya / Gue / Kamu / Kita)', 'Aku') || 'Aku';
-        payload.voice_perspective = voice.trim() || 'Aku';
+        if (format === 'reels_vo' || format === 'reels_panjang') {
+            const voice = prompt('Sudut pandang VO? (Aku / Saya / Gue / Kamu / Kita)', 'Aku') || 'Aku';
+            payload.voice_perspective = voice.trim() || 'Aku';
+        }
         if (format === 'reels_panjang') {
             const minutes = Number(prompt('Durasi video panjang (menit)? 5–15', '10') || '10');
             payload.duration_minutes = Math.min(20, Math.max(3, minutes || 10));
             payload.prefer_stock = true;
-        } else {
+        } else if (format === 'reels_text') {
+            const seconds = Number(prompt('Durasi image→video (detik)? 5–15', '8') || '8');
+            payload.duration_seconds = Math.min(30, Math.max(5, seconds || 8));
+        } else if (format === 'reels_vo') {
             const seconds = Number(prompt('Durasi Reels VO (detik)? 10–60', '15') || '15');
             payload.duration_seconds = Math.min(90, Math.max(10, seconds || 15));
         }
@@ -149,14 +154,28 @@ onMounted(load);
                         :disabled="!!makingId"
                         @click="makeBlueprint(idea, 'reels_vo')"
                     >
-                        {{ makingId === `${idea.id}:reels_vo` ? '...' : 'Blueprint VO' }}
+                        {{ makingId === `${idea.id}:reels_vo` ? '...' : 'VO' }}
                     </button>
                     <button
                         class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
                         :disabled="!!makingId"
                         @click="makeBlueprint(idea, 'reels_panjang')"
                     >
-                        {{ makingId === `${idea.id}:reels_panjang` ? '...' : 'Blueprint Panjang' }}
+                        {{ makingId === `${idea.id}:reels_panjang` ? '...' : 'Panjang' }}
+                    </button>
+                    <button
+                        class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                        :disabled="!!makingId"
+                        @click="makeBlueprint(idea, 'reels_text')"
+                    >
+                        {{ makingId === `${idea.id}:reels_text` ? '...' : 'Text Tempel' }}
+                    </button>
+                    <button
+                        class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                        :disabled="!!makingId"
+                        @click="makeBlueprint(idea, 'foto')"
+                    >
+                        {{ makingId === `${idea.id}:foto` ? '...' : 'Foto' }}
                     </button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'in_progress')">Kerjakan</button>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="setStatus(idea, 'published')">Sudah publish</button>

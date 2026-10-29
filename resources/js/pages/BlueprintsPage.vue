@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import http from '../api/http';
 
@@ -11,27 +11,46 @@ const message = ref('');
 const error = ref('');
 const topic = ref('');
 const plannedDate = ref('');
+const plannedTime = ref('09:00');
 const format = ref('reels_vo');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
+const textDurationSeconds = ref(8);
 const preferStock = ref(true);
 const voicePerspective = ref('Aku');
 
 const formatLabel = {
     reels_vo: 'Reels VO',
     reels_panjang: 'Reels Panjang',
+    reels_text: 'Reels Text Tempel',
+    foto: 'Postingan Foto',
 };
 
 const voDurationOptions = [10, 15, 20, 30, 45, 60];
 const longDurationOptions = [5, 8, 10, 12, 15];
+const textDurationOptions = [5, 6, 8, 10, 12, 15];
 const voiceOptions = ['Aku', 'Saya', 'Gue', 'Kamu', 'Kita', 'Dia', 'Orang ketiga'];
+
+const isVo = computed(() => format.value === 'reels_vo');
+const isLong = computed(() => format.value === 'reels_panjang');
+const isText = computed(() => format.value === 'reels_text');
+const isFoto = computed(() => format.value === 'foto');
+const needsVoice = computed(() => isVo.value || isLong.value);
 
 function durationLabel(seconds) {
     const s = Number(seconds) || 0;
+    if (!s) return '-';
     if (s < 60) return `${s} detik`;
     const m = Math.floor(s / 60);
     const r = s % 60;
     return r ? `${m} menit ${r} detik` : `${m} menit`;
+}
+
+function scheduleLabel(bp) {
+    if (!bp.planned_date) return 'Belum dijadwalkan';
+    const d = String(bp.planned_date).slice(0, 10);
+    const t = bp.planned_time ? String(bp.planned_time).slice(0, 5) : null;
+    return t ? `Kalender: ${d} ${t}` : `Kalender: ${d}`;
 }
 
 async function load() {
@@ -59,13 +78,18 @@ async function generate() {
         const payload = {
             topic: topic.value.trim(),
             planned_date: plannedDate.value || null,
+            planned_time: plannedDate.value ? (plannedTime.value || null) : null,
             format: format.value,
         };
-        payload.voice_perspective = voicePerspective.value || 'Aku';
-        if (format.value === 'reels_panjang') {
+        if (needsVoice.value) {
+            payload.voice_perspective = voicePerspective.value || 'Aku';
+        }
+        if (isLong.value) {
             payload.duration_minutes = Number(durationMinutes.value);
             payload.prefer_stock = !!preferStock.value;
-        } else {
+        } else if (isText.value) {
+            payload.duration_seconds = Number(textDurationSeconds.value);
+        } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
         }
         const { data } = await http.post('/blueprints/generate', payload);
@@ -101,9 +125,9 @@ onMounted(load);
 <template>
     <div class="space-y-6">
         <div>
-            <h2 class="text-2xl font-semibold text-slate-900">Blueprint Reels</h2>
+            <h2 class="text-2xl font-semibold text-slate-900">Blueprint Konten</h2>
             <p class="mt-1 text-sm text-slate-500">
-                Durasi dipilih per generate. Beat tetap 5 detik. Video panjang tetap ada bumper; bisa utamakan stock video.
+                Pilih mode: Reels VO, Panjang, Text Tempel, atau Foto. Jadwal bisa pakai tanggal + jam.
             </p>
         </div>
 
@@ -114,60 +138,63 @@ onMounted(load);
             <h3 class="font-semibold text-slate-900">Buat dari tema / ide</h3>
             <div class="mt-3 flex flex-wrap gap-2">
                 <button
+                    v-for="(label, key) in formatLabel"
+                    :key="key"
                     type="button"
                     class="rounded-lg px-3 py-2 text-sm font-semibold"
-                    :class="format === 'reels_vo' ? 'bg-teal-700 text-white' : 'border border-slate-200 text-slate-700'"
-                    @click="format = 'reels_vo'"
+                    :class="format === key ? 'bg-teal-700 text-white' : 'border border-slate-200 text-slate-700'"
+                    @click="format = key"
                 >
-                    Reels VO
-                </button>
-                <button
-                    type="button"
-                    class="rounded-lg px-3 py-2 text-sm font-semibold"
-                    :class="format === 'reels_panjang' ? 'bg-teal-700 text-white' : 'border border-slate-200 text-slate-700'"
-                    @click="format = 'reels_panjang'"
-                >
-                    Reels Panjang / VOD
+                    {{ label }}
                 </button>
             </div>
 
             <div class="mt-3 flex flex-wrap items-end gap-3">
-                <label v-if="format === 'reels_vo'" class="text-sm">
+                <label v-if="isVo" class="text-sm">
                     <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi (detik)</span>
                     <select v-model.number="durationSeconds" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
                         <option v-for="s in voDurationOptions" :key="s" :value="s">{{ s }} detik · {{ s / 5 }} beat</option>
                     </select>
                 </label>
-                <label v-else class="text-sm">
+                <label v-else-if="isLong" class="text-sm">
                     <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi (menit)</span>
                     <select v-model.number="durationMinutes" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
                         <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} menit · ~{{ (m * 60) / 5 }} beat</option>
                     </select>
                 </label>
-                <label class="text-sm">
+                <label v-else-if="isText" class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi image→video</span>
+                    <select v-model.number="textDurationSeconds" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="s in textDurationOptions" :key="s" :value="s">{{ s }} detik</option>
+                    </select>
+                </label>
+                <label v-if="needsVoice" class="text-sm">
                     <span class="mb-1 block text-xs font-semibold text-slate-500">Sudut pandang VO</span>
                     <select v-model="voicePerspective" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
                         <option v-for="v in voiceOptions" :key="v" :value="v">{{ v }}</option>
                     </select>
                 </label>
-                <label v-if="format === 'reels_panjang'" class="flex items-center gap-2 text-sm text-slate-700">
+                <label v-if="isLong" class="flex items-center gap-2 text-sm text-slate-700">
                     <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
                     Utamakan stock video (AI minimal)
                 </label>
             </div>
 
             <p class="mt-2 text-xs text-slate-500">
-                <template v-if="format === 'reels_vo'">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
-                <template v-else>Golden Hook → Bab → Penutup · beat 5 dtk · bumper tiap bab · visual mayoritas stock/black.</template>
+                <template v-if="isVo">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
+                <template v-else-if="isLong">Golden Hook → Bab → Penutup · beat 5 dtk · bumper tiap bab · visual mayoritas stock/black.</template>
+                <template v-else-if="isText">1 prompt image (teks sudah di gambar) + prompt image-to-video + caption. Tanpa edit teks lagi.</template>
+                <template v-else>1 prompt generate image saja — teks judul sudah baked-in di prompt.</template>
             </p>
-            <form class="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto]" @submit.prevent="generate">
+            <form class="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]" @submit.prevent="generate">
                 <input
                     v-model="topic"
                     required
-                    :placeholder="format === 'reels_panjang' ? 'Contoh: Frame Control & Pembalikan Realita' : 'Contoh: Orang kaya asli vs pamer gengsi'"
+                    :placeholder="isFoto ? 'Contoh: Jangan jawab pertanyaan jebakan' : isText ? 'Contoh: Orang kaya asli vs pamer gengsi' : isLong ? 'Contoh: Frame Control & Pembalikan Realita' : 'Contoh: Orang kaya asli vs pamer gengsi'"
                     class="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
-                <input v-model="plannedDate" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" title="Masuk kalender" />
+                <input v-model="plannedDate" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" title="Tanggal kalender" />
+                <input v-model="plannedTime" type="time" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" title="Jam post" :disabled="!plannedDate" />
                 <button
                     type="submit"
                     class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
@@ -204,11 +231,15 @@ onMounted(load);
                 </div>
                 <p class="mt-1 line-clamp-2 text-sm text-slate-600">{{ bp.story_concept }}</p>
                 <p class="mt-2 text-xs text-slate-500">
-                    {{ bp.planned_date ? `Kalender: ${bp.planned_date}` : 'Belum dijadwalkan' }}
-                    · {{ bp.duration_seconds ? durationLabel(bp.duration_seconds) : '-' }}
-                    · beat {{ bp.beat_seconds || 5 }} dtk
-                    · sudut {{ bp.voice_perspective || 'Aku' }}
-                    · {{ (bp.scenes || []).length }} scene
+                    {{ scheduleLabel(bp) }}
+                    <template v-if="bp.format === 'foto'"> · prompt image</template>
+                    <template v-else-if="bp.format === 'reels_text'"> · i2v {{ durationLabel(bp.duration_seconds) }}</template>
+                    <template v-else>
+                        · {{ durationLabel(bp.duration_seconds) }}
+                        · beat {{ bp.beat_seconds || 5 }} dtk
+                        · sudut {{ bp.voice_perspective || 'Aku' }}
+                        · {{ (bp.scenes || []).length }} scene
+                    </template>
                 </p>
                 <div class="mt-3 flex gap-2" @click.stop>
                     <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" @click="router.push({ name: 'blueprint-detail', params: { id: bp.id } })">
