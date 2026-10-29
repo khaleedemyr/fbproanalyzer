@@ -28,8 +28,9 @@ class AutoRadarService
         $counts = [
             'google_trends' => 0,
             'youtube' => 0,
-            'seed' => 0,
+            'keyword_radar' => 0,
         ];
+        $warnings = [];
 
         $daily = $this->googleTrends->fetchDaily($region);
         $psychTrends = $this->googleTrends->filterPsychology($daily, $keywords);
@@ -43,33 +44,32 @@ class AutoRadarService
 
         foreach ($keywords as $keyword) {
             $interestScore = (int) ($interest[$keyword] ?? 40);
-            // metric_value pakai skala besar agar ranking jelas; viral_score dari interest 0-100.
             $metric = $interestScore * 1000;
 
-            $this->upsert('seed', $niche, $region, [
+            $this->upsert('keyword_radar', $niche, $region, [
                 'keyword' => $keyword,
                 'title' => $keyword,
-                'snippet' => 'Minat relatif 7 hari (skor '.$interestScore.'/100). Topik pantauan otomatis niche psikologi.',
+                'snippet' => 'Google minat relatif 7 hari: '.$interestScore.'/100 · pantauan otomatis niche psikologi.',
                 'url' => 'https://trends.google.com/trends/explore?geo='.$region.'&q='.urlencode($keyword),
                 'metric_value' => $metric,
                 'format' => 'topic',
                 'interest' => $interestScore,
                 'raw' => [
-                    'seed' => true,
+                    'platform' => 'google',
                     'interest_7d' => $interestScore,
                 ],
             ]);
-            $counts['seed']++;
+            $counts['keyword_radar']++;
         }
 
-        try {
-            $videos = $this->youtubeTrends->fetch($keywords);
-            foreach ($videos as $item) {
-                $this->upsert('youtube', $niche, $region, $item);
-                $counts['youtube']++;
-            }
-        } catch (\Throwable $e) {
-            Log::warning('YouTube radar sync failed: '.$e->getMessage());
+        $youtube = $this->youtubeTrends->fetchWithStatus($keywords);
+        foreach ($youtube['items'] as $item) {
+            $this->upsert('youtube', $niche, $region, $item);
+            $counts['youtube']++;
+        }
+        if ($youtube['error']) {
+            $warnings[] = 'YouTube: '.$youtube['error'];
+            Log::warning('YouTube radar: '.$youtube['error']);
         }
 
         $ideas = 0;
@@ -81,6 +81,8 @@ class AutoRadarService
             'synced' => array_sum($counts),
             'sources' => $counts,
             'ideas' => $ideas,
+            'warnings' => $warnings,
+            'youtube_configured' => filled(trim((string) config('radar.youtube_api_key'))),
         ];
     }
 

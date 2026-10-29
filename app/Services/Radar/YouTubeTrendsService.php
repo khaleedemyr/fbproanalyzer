@@ -3,83 +3,154 @@
 namespace App\Services\Radar;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Str;
+use RuntimeException;
 
 class YouTubeTrendsService
 {
     /**
      * @param  array<int, string>  $keywords
-     * @return array<int, array<string, mixed>>
+     * @return array{items: array<int, array<string, mixed>>, error: ?string}
      */
-    public function fetch(array $keywords, ?string $apiKey = null): array
+    public function fetchWithStatus(array $keywords, ?string $apiKey = null): array
     {
-        $apiKey = $apiKey ?: config('radar.youtube_api_key');
-        if (blank($apiKey)) {
-            return [];
+        $apiKey = trim((string) ($apiKey ?: config('radar.youtube_api_key')));
+        if ($apiKey === '') {
+            return [
+                'items' => [],
+                'error' => 'YOUTUBE_API_KEY kosong / belum terbaca. Cek .env lalu jalankan php artisan config:clear',
+            ];
         }
 
-        $since = now()->subDays(14)->toRfc3339String();
+        $since = now()->subDays(21)->utc()->format('Y-m-d\TH:i:s\Z');
         $items = [];
+        $lastError = null;
 
-        foreach (array_slice($keywords, 0, 8) as $keyword) {
-            $response = Http::timeout(20)->get('https://www.googleapis.com/youtube/v3/search', [
+        foreach (array_slice($keywords, 0, 5) as $keyword) {
+            try {
+                $videos = $this->searchVideos($keyword, $apiKey, $since);
+                foreach ($videos as $video) {
+                    $items[] = $video;
+                }
+            } catch (RuntimeException $e) {
+                $lastError = $e->getMessage();
+                break;
+            }
+        }
+
+        $unique = collect($items)
+            ->sortByDesc('metric_value')
+            ->unique(fn (array $item) => $item['url'])
+            ->take(30)
+            ->values()
+            ->all();
+
+        if ($unique === [] && $lastError === null) {
+            $lastError = 'YouTube API merespons tapi tidak ada video cocok untuk keyword niche. Coba lagi nanti.';
+        }
+
+        return [
+            'items' => $unique,
+            'error' => $unique === [] ? $lastError : null,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function searchVideos(string $keyword, string $apiKey, string $since): array
+    {
+        $response = Http::timeout(25)->get('https://www.googleapis.com/youtube/v3/search', [
+            'part' => 'snippet',
+            'q' => $keyword.' psikologi',
+            'type' => 'video',
+            'order' => 'viewCount',
+            'publishedAfter' => $since,
+            'maxResults' => 4,
+            'relevanceLanguage' => 'id',
+            'regionCode' => 'ID',
+            'key' => $apiKey,
+        ]);
+
+        if (! $response->successful()) {
+            $message = data_get($response->json(), 'error.message')
+                ?: 'HTTP '.$response->status().' dari YouTube API';
+            throw new RuntimeException($message);
+        }
+
+        $rows = $response->json('items') ?? [];
+        if ($rows === []) {
+            // Fallback tanpa publishedAfter ketat
+            $response = Http::timeout(25)->get('https://www.googleapis.com/youtube/v3/search', [
                 'part' => 'snippet',
                 'q' => $keyword.' Indonesia',
                 'type' => 'video',
-                'order' => 'viewCount',
-                'publishedAfter' => $since,
-                'maxResults' => 5,
+                'order' => 'relevance',
+                'maxResults' => 4,
                 'relevanceLanguage' => 'id',
                 'regionCode' => 'ID',
                 'key' => $apiKey,
             ]);
 
             if (! $response->successful()) {
+                $message = data_get($response->json(), 'error.message')
+                    ?: 'HTTP '.$response->status().' dari YouTube API';
+                throw new RuntimeException($message);
+            }
+
+            $rows = $response->json('items') ?? [];
+        }
+
+        $videoIds = collect($rows)
+            ->map(fn ($row) => data_get($row, 'id.videoId'))
+            ->filter()
+            ->values()
+            ->all();
+
+        $statsMap = $this->videoStatsMap($videoIds, $apiKey);
+        $items = [];
+
+        foreach ($rows as $video) {
+            $videoId = data_get($video, 'id.videoId');
+            $title = (string) data_get($video, 'snippet.title', '');
+            if (! $videoId || $title === '') {
                 continue;
             }
 
-            foreach ($response->json('items') ?? [] as $video) {
-                $videoId = data_get($video, 'id.videoId');
-                $title = (string) data_get($video, 'snippet.title', '');
-                if (! $videoId || $title === '') {
-                    continue;
-                }
+            $stats = $statsMap[$videoId] ?? [];
+            $views = (int) ($stats['viewCount'] ?? 0);
 
-                $stats = $this->videoStats($videoId, $apiKey);
-                $views = (int) ($stats['viewCount'] ?? 0);
-
-                $items[] = [
-                    'keyword' => $keyword,
-                    'title' => $title,
-                    'snippet' => (string) data_get($video, 'snippet.description', ''),
-                    'url' => 'https://www.youtube.com/watch?v='.$videoId,
-                    'metric_value' => $views,
-                    'format' => 'video',
-                    'raw' => [
-                        'channel' => data_get($video, 'snippet.channelTitle'),
-                        'published_at' => data_get($video, 'snippet.publishedAt'),
-                        'stats' => $stats,
-                    ],
-                ];
-            }
+            $items[] = [
+                'keyword' => $keyword,
+                'title' => $title,
+                'snippet' => 'YouTube · '.(string) data_get($video, 'snippet.channelTitle', ''),
+                'url' => 'https://www.youtube.com/watch?v='.$videoId,
+                'metric_value' => $views,
+                'format' => 'video',
+                'raw' => [
+                    'channel' => data_get($video, 'snippet.channelTitle'),
+                    'published_at' => data_get($video, 'snippet.publishedAt'),
+                    'stats' => $stats,
+                    'platform' => 'youtube',
+                ],
+            ];
         }
 
-        return collect($items)
-            ->sortByDesc('metric_value')
-            ->unique(fn (array $item) => $item['url'])
-            ->take(40)
-            ->values()
-            ->all();
+        return $items;
     }
 
     /**
-     * @return array<string, mixed>
+     * @param  array<int, string>  $videoIds
+     * @return array<string, array<string, mixed>>
      */
-    private function videoStats(string $videoId, string $apiKey): array
+    private function videoStatsMap(array $videoIds, string $apiKey): array
     {
-        $response = Http::timeout(15)->get('https://www.googleapis.com/youtube/v3/videos', [
+        if ($videoIds === []) {
+            return [];
+        }
+
+        $response = Http::timeout(20)->get('https://www.googleapis.com/youtube/v3/videos', [
             'part' => 'statistics',
-            'id' => $videoId,
+            'id' => implode(',', $videoIds),
             'key' => $apiKey,
         ]);
 
@@ -87,6 +158,11 @@ class YouTubeTrendsService
             return [];
         }
 
-        return $response->json('items.0.statistics') ?? [];
+        $map = [];
+        foreach ($response->json('items') ?? [] as $item) {
+            $map[$item['id']] = $item['statistics'] ?? [];
+        }
+
+        return $map;
     }
 }

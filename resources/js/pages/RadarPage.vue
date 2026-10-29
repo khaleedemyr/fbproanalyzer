@@ -7,6 +7,21 @@ const syncing = ref(false);
 const data = ref(null);
 const message = ref('');
 const error = ref('');
+const warnings = ref([]);
+
+const sourceLabel = {
+    youtube: 'YouTube',
+    google_trends: 'Google Trends',
+    keyword_radar: 'Google Keyword',
+    seed: 'Keyword',
+};
+
+const sourceBadge = {
+    youtube: 'bg-red-50 text-red-700',
+    google_trends: 'bg-blue-50 text-blue-700',
+    keyword_radar: 'bg-sky-50 text-sky-800',
+    seed: 'bg-slate-100 text-slate-700',
+};
 
 async function load() {
     loading.value = true;
@@ -25,9 +40,12 @@ async function runSync() {
     syncing.value = true;
     message.value = '';
     error.value = '';
+    warnings.value = [];
     try {
         const res = await http.post('/radar/sync');
-        message.value = `${res.data.message} (${res.data.result.synced} sinyal, ${res.data.result.ideas} ide)`;
+        const sources = res.data.result.sources || {};
+        message.value = `${res.data.message} · YT ${sources.youtube || 0} · Google ${sources.google_trends || 0} · Keyword ${sources.keyword_radar || sources.seed || 0} · Ide ${res.data.result.ideas || 0}`;
+        warnings.value = res.data.result.warnings || [];
         await load();
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal menjalankan auto radar.';
@@ -45,7 +63,7 @@ onMounted(load);
             <div>
                 <h2 class="text-2xl font-semibold text-slate-900">Auto Viral Radar</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                    Deteksi otomatis topik/konten yang sedang naik untuk niche psikologi — tanpa catat manual tiap hari.
+                    Deteksi otomatis topik/konten yang sedang naik. Sumber dipisah: YouTube vs Google.
                 </p>
             </div>
             <button
@@ -60,10 +78,12 @@ onMounted(load);
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>
         <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
+        <div v-for="warn in warnings" :key="warn" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {{ warn }}
+        </div>
 
         <div v-if="data && !data.youtube_configured" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            YouTube belum dikonfigurasi. Radar tetap jalan dari Google Trends + keyword seed.
-            Untuk sinyal video otomatis, tambah <code>YOUTUBE_API_KEY</code> di .env server.
+            YouTube API key belum terbaca. Pastikan di `.env` server ada `YOUTUBE_API_KEY=...` lalu `php artisan config:clear`.
         </div>
 
         <div v-if="loading" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat sinyal...</div>
@@ -71,7 +91,7 @@ onMounted(load);
         <template v-else-if="data">
             <div class="grid gap-4 sm:grid-cols-3">
                 <div v-for="row in data.by_source" :key="row.source" class="rounded-xl border border-slate-200 bg-white p-4">
-                    <p class="text-xs uppercase tracking-wide text-slate-500">{{ row.source }}</p>
+                    <p class="text-xs uppercase tracking-wide text-slate-500">{{ sourceLabel[row.source] || row.source }}</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ row.total }}</p>
                     <p class="text-xs text-slate-500">avg skor {{ Number(row.avg_score || 0).toFixed(1) }}</p>
                 </div>
@@ -88,9 +108,18 @@ onMounted(load);
                         class="flex items-start justify-between gap-3 px-4 py-3 hover:bg-slate-50"
                     >
                         <div>
+                            <div class="mb-1 flex flex-wrap items-center gap-2">
+                                <span
+                                    class="rounded px-2 py-0.5 text-[11px] font-semibold"
+                                    :class="sourceBadge[signal.source] || 'bg-slate-100 text-slate-700'"
+                                >
+                                    {{ sourceLabel[signal.source] || signal.source }}
+                                </span>
+                                <span class="text-[11px] text-slate-500">{{ signal.format }}</span>
+                            </div>
                             <p class="text-sm font-medium text-slate-900">{{ signal.title || signal.keyword }}</p>
                             <p class="mt-1 text-xs text-slate-500">
-                                {{ signal.source }} · {{ signal.format }} · {{ signal.keyword }}
+                                keyword: {{ signal.keyword }}
                                 <span v-if="signal.metric_value"> · metric {{ signal.metric_value }}</span>
                             </p>
                             <p v-if="signal.snippet" class="mt-1 line-clamp-2 text-xs text-slate-600">{{ signal.snippet }}</p>

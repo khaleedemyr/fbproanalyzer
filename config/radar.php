@@ -3,7 +3,7 @@
 return [
     'niche' => env('RADAR_NICHE', 'psikologi'),
     'region' => env('RADAR_REGION', 'ID'),
-    'youtube_api_key' => env('YOUTUBE_API_KEY'),
+    'youtube_api_key' => trim((string) env('YOUTUBE_API_KEY', '')),
     'keywords' => [
         'psikologi',
         'kesehatan mental',
