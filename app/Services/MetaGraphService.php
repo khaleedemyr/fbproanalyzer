@@ -9,15 +9,19 @@ class MetaGraphService
 {
     public function authUrl(string $state): string
     {
-        $params = http_build_query([
+        $params = [
             'client_id' => config('meta.app_id'),
             'redirect_uri' => config('meta.redirect_uri'),
             'state' => $state,
-            'scope' => implode(',', config('meta.scopes')),
             'response_type' => 'code',
-        ]);
+        ];
 
-        return 'https://www.facebook.com/'.config('meta.graph_version').'/dialog/oauth?'.$params;
+        $scopes = array_values(array_filter(config('meta.scopes', [])));
+        if ($scopes !== []) {
+            $params['scope'] = implode(',', $scopes);
+        }
+
+        return 'https://www.facebook.com/'.config('meta.graph_version').'/dialog/oauth?'.http_build_query($params);
     }
 
     public function exchangeCode(string $code): array

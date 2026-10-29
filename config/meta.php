@@ -1,14 +1,12 @@
 <?php
 
 /**
- * Scopes default sengaja minimal agar OAuth lolos dulu.
- * Setelah di Meta App kamu menambah use case Pages + permission,
- * isi META_SCOPES di .env (comma-separated) misalnya:
- * public_profile,email,pages_show_list,pages_read_engagement,pages_read_user_content,read_insights
+ * Default hanya public_profile — permission bawaan Facebook Login.
+ * email / pages_* harus diaktifkan dulu di Meta App (Sesuaikan use case),
+ * baru diisi lewat META_SCOPES.
  */
 $defaultScopes = [
     'public_profile',
-    'email',
 ];
 
 $envScopes = array_values(array_filter(array_map(
