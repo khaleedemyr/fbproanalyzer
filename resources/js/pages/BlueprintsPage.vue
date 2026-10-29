@@ -45,7 +45,10 @@ async function generate() {
             planned_date: plannedDate.value || null,
             format: format.value,
         });
-        message.value = `${data.message} (engine: ${data.engine})`;
+        message.value = data.message;
+        if (data.warning) {
+            error.value = data.warning;
+        }
         topic.value = '';
         await load();
         if (data.data?.id) {

@@ -16,6 +16,20 @@ class BlueprintGeneratorService
 
     public const FORMAT_REELS_PANJANG = 'reels_panjang';
 
+    protected string $lastEngine = 'template';
+
+    protected ?string $lastWarning = null;
+
+    public function lastEngine(): string
+    {
+        return $this->lastEngine;
+    }
+
+    public function lastWarning(): ?string
+    {
+        return $this->lastWarning;
+    }
+
     public function generateFromTopic(
         User $user,
         string $topic,
@@ -30,10 +44,18 @@ class BlueprintGeneratorService
         $title = $this->coverTitle($topic, $idea);
         $format = $this->normalizeFormat($format);
 
-        $payload = $this->tryGemini($kit, $title, $topic, $idea, $format)
-            ?? ($format === self::FORMAT_REELS_PANJANG
+        $this->lastEngine = 'template';
+        $this->lastWarning = null;
+
+        $gemini = $this->tryGemini($kit, $title, $topic, $idea, $format);
+        if ($gemini !== null) {
+            $this->lastEngine = 'gemini';
+            $payload = $gemini;
+        } else {
+            $payload = $format === self::FORMAT_REELS_PANJANG
                 ? $this->buildLongTemplate($kit, $title, $topic, $idea)
-                : $this->buildShortTemplate($kit, $title, $topic, $idea));
+                : $this->buildShortTemplate($kit, $title, $topic, $idea);
+        }
 
         return ContentBlueprint::query()->create([
             'user_id' => $user->id,
@@ -162,6 +184,8 @@ class BlueprintGeneratorService
     {
         $apiKey = trim((string) config('blueprint.gemini_api_key', ''));
         if ($apiKey === '') {
+            $this->lastWarning = 'GEMINI_API_KEY belum terisi / belum kebaca config. Fallback template.';
+
             return null;
         }
 
@@ -171,7 +195,7 @@ class BlueprintGeneratorService
             : $this->geminiShortPrompt($kit, $title, $topic, $idea);
 
         try {
-            $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 90 : 45)
+            $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 120 : 60)
                 ->withHeaders(['Content-Type' => 'application/json'])
                 ->post(
                     "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
@@ -187,16 +211,25 @@ class BlueprintGeneratorService
                 );
 
             if (! $response->successful()) {
+                $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
+                $this->lastWarning = 'Gemini gagal: '.$err.' — pakai template.';
+
                 return null;
             }
 
             $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
             if (! is_string($text) || $text === '') {
+                $block = data_get($response->json(), 'candidates.0.finishReason')
+                    ?: data_get($response->json(), 'promptFeedback.blockReason');
+                $this->lastWarning = 'Gemini kosong'.($block ? " ({$block})" : '').' — pakai template.';
+
                 return null;
             }
 
             $decoded = json_decode($text, true);
             if (! is_array($decoded) || empty($decoded['scenes']) || ! is_array($decoded['scenes'])) {
+                $this->lastWarning = 'Respons Gemini bukan JSON blueprint valid — pakai template.';
+
                 return null;
             }
 
@@ -217,7 +250,9 @@ class BlueprintGeneratorService
                 'caption' => (string) ($decoded['caption'] ?? ''),
                 'title_options' => array_values(array_map('strval', $decoded['title_options'] ?? [])),
             ];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $this->lastWarning = 'Gemini error: '.$e->getMessage().' — pakai template.';
+
             return null;
         }
     }

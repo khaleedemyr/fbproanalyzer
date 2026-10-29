@@ -83,15 +83,20 @@ class BlueprintController extends Controller
 
         $bp->load('brandKit');
 
+        $engine = $generator->lastEngine();
+        $warning = $generator->lastWarning();
         $label = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
             ? 'Blueprint Reels Panjang siap.'
             : 'Blueprint Reels VO siap.';
+        $label .= $engine === 'gemini' ? ' (AI Gemini)' : ' (template)';
 
         return response()->json([
             'message' => $label,
             'data' => $bp,
             'markdown' => $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($user)),
-            'engine' => filled(config('blueprint.gemini_api_key')) ? 'gemini' : 'template',
+            'engine' => $engine,
+            'gemini_configured' => filled(config('blueprint.gemini_api_key')),
+            'warning' => $warning,
         ], 201);
     }
 
