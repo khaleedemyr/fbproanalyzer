@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AngleFinderController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\BrandKitController;
@@ -47,6 +48,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('ideas/generate', [ContentIdeaController::class, 'generate']);
     Route::patch('ideas/{contentIdea}', [ContentIdeaController::class, 'update']);
     Route::delete('ideas/{contentIdea}', [ContentIdeaController::class, 'destroy']);
+
+    Route::get('angle-finder', [AngleFinderController::class, 'index']);
+    Route::post('angle-finder/analyze', [AngleFinderController::class, 'analyze']);
+    Route::get('angle-finder/{angleFinding}', [AngleFinderController::class, 'show']);
+    Route::post('angle-finder/{angleFinding}/save-idea', [AngleFinderController::class, 'saveIdea']);
+    Route::delete('angle-finder/{angleFinding}', [AngleFinderController::class, 'destroy']);
 
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);

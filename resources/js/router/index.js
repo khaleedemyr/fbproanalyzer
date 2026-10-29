@@ -30,6 +30,11 @@ const routes = [
                 component: () => import('../pages/RadarPage.vue'),
             },
             {
+                path: 'angle-finder',
+                name: 'angle-finder',
+                component: () => import('../pages/AngleFinderPage.vue'),
+            },
+            {
                 path: 'posts',
                 name: 'posts',
                 component: () => import('../pages/PostsPage.vue'),

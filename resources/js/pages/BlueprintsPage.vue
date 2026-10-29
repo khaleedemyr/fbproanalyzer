@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import http from '../api/http';
 
+const route = useRoute();
 const router = useRouter();
 const loading = ref(true);
 const generating = ref(false);
@@ -119,7 +120,15 @@ async function removeItem(id) {
     await load();
 }
 
-onMounted(load);
+onMounted(() => {
+    if (route.query.topic) {
+        topic.value = String(route.query.topic);
+    }
+    if (route.query.format && ['reels_vo', 'reels_panjang', 'reels_text', 'foto'].includes(String(route.query.format))) {
+        format.value = String(route.query.format);
+    }
+    load();
+});
 </script>
 
 <template>

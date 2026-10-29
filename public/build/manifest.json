@@ -40,7 +40,7 @@
     "name": "http"
   },
   "resources/css/app.css": {
-    "file": "assets/app-DNuPuRfN.css",
+    "file": "assets/app-DhDk_5Dc.css",
     "name": "app",
     "names": [
       "app.css"
@@ -49,7 +49,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-BB8a2Pjy.js",
+    "file": "assets/app-B4B4Y18E.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -62,6 +62,7 @@
       "resources/js/layouts/AppLayout.vue",
       "resources/js/pages/DashboardPage.vue",
       "resources/js/pages/RadarPage.vue",
+      "resources/js/pages/AngleFinderPage.vue",
       "resources/js/pages/PostsPage.vue",
       "resources/js/pages/AccountsPage.vue",
       "resources/js/pages/WatchlistPage.vue",
@@ -73,7 +74,7 @@
     ]
   },
   "resources/js/layouts/AppLayout.vue": {
-    "file": "assets/AppLayout-CLAlNAgf.js",
+    "file": "assets/AppLayout-DQehFHgz.js",
     "name": "AppLayout",
     "src": "resources/js/layouts/AppLayout.vue",
     "isDynamicEntry": true,
@@ -83,7 +84,7 @@
     ]
   },
   "resources/js/pages/AccountsPage.vue": {
-    "file": "assets/AccountsPage-DULAVC7q.js",
+    "file": "assets/AccountsPage-BedDS-BE.js",
     "name": "AccountsPage",
     "src": "resources/js/pages/AccountsPage.vue",
     "isDynamicEntry": true,
@@ -92,8 +93,18 @@
       "resources/js/app.js"
     ]
   },
+  "resources/js/pages/AngleFinderPage.vue": {
+    "file": "assets/AngleFinderPage-vr0IclGp.js",
+    "name": "AngleFinderPage",
+    "src": "resources/js/pages/AngleFinderPage.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_http-COO143JM.js",
+      "resources/js/app.js"
+    ]
+  },
   "resources/js/pages/BlueprintDetailPage.vue": {
-    "file": "assets/BlueprintDetailPage-Cf4cIAn1.js",
+    "file": "assets/BlueprintDetailPage-BLXPrDsF.js",
     "name": "BlueprintDetailPage",
     "src": "resources/js/pages/BlueprintDetailPage.vue",
     "isDynamicEntry": true,
@@ -103,7 +114,7 @@
     ]
   },
   "resources/js/pages/BlueprintsPage.vue": {
-    "file": "assets/BlueprintsPage-Y6RSrSUO.js",
+    "file": "assets/BlueprintsPage-Be5mLpsF.js",
     "name": "BlueprintsPage",
     "src": "resources/js/pages/BlueprintsPage.vue",
     "isDynamicEntry": true,
@@ -113,7 +124,7 @@
     ]
   },
   "resources/js/pages/BrandKitPage.vue": {
-    "file": "assets/BrandKitPage-BY57p-Fg.js",
+    "file": "assets/BrandKitPage-qKqQsjni.js",
     "name": "BrandKitPage",
     "src": "resources/js/pages/BrandKitPage.vue",
     "isDynamicEntry": true,
@@ -123,7 +134,7 @@
     ]
   },
   "resources/js/pages/CalendarPage.vue": {
-    "file": "assets/CalendarPage-DQDc6cnD.js",
+    "file": "assets/CalendarPage-bnis0Pdd.js",
     "name": "CalendarPage",
     "src": "resources/js/pages/CalendarPage.vue",
     "isDynamicEntry": true,
@@ -133,7 +144,7 @@
     ]
   },
   "resources/js/pages/DashboardPage.vue": {
-    "file": "assets/DashboardPage-CkHf-wsH.js",
+    "file": "assets/DashboardPage-C4zHYdPS.js",
     "name": "DashboardPage",
     "src": "resources/js/pages/DashboardPage.vue",
     "isDynamicEntry": true,
@@ -143,7 +154,7 @@
     ]
   },
   "resources/js/pages/IdeasPage.vue": {
-    "file": "assets/IdeasPage-CRxTM8lv.js",
+    "file": "assets/IdeasPage-Cq9G429s.js",
     "name": "IdeasPage",
     "src": "resources/js/pages/IdeasPage.vue",
     "isDynamicEntry": true,
@@ -153,7 +164,7 @@
     ]
   },
   "resources/js/pages/LoginPage.vue": {
-    "file": "assets/LoginPage-CU3xiUea.js",
+    "file": "assets/LoginPage-DWgNpUue.js",
     "name": "LoginPage",
     "src": "resources/js/pages/LoginPage.vue",
     "isDynamicEntry": true,
@@ -163,7 +174,7 @@
     ]
   },
   "resources/js/pages/PostsPage.vue": {
-    "file": "assets/PostsPage-BCq8OrS4.js",
+    "file": "assets/PostsPage-BJ7vft2q.js",
     "name": "PostsPage",
     "src": "resources/js/pages/PostsPage.vue",
     "isDynamicEntry": true,
@@ -173,7 +184,7 @@
     ]
   },
   "resources/js/pages/RadarPage.vue": {
-    "file": "assets/RadarPage-u2z-PTei.js",
+    "file": "assets/RadarPage-BRwozMO4.js",
     "name": "RadarPage",
     "src": "resources/js/pages/RadarPage.vue",
     "isDynamicEntry": true,
@@ -183,7 +194,7 @@
     ]
   },
   "resources/js/pages/RegisterPage.vue": {
-    "file": "assets/RegisterPage-7gaN0eql.js",
+    "file": "assets/RegisterPage-CdVKK3Gj.js",
     "name": "RegisterPage",
     "src": "resources/js/pages/RegisterPage.vue",
     "isDynamicEntry": true,
@@ -193,7 +204,7 @@
     ]
   },
   "resources/js/pages/WatchlistPage.vue": {
-    "file": "assets/WatchlistPage-BM8qyODq.js",
+    "file": "assets/WatchlistPage-Dp1MGfkG.js",
     "name": "WatchlistPage",
     "src": "resources/js/pages/WatchlistPage.vue",
     "isDynamicEntry": true,

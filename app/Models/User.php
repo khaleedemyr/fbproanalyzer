@@ -55,4 +55,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(ContentBlueprint::class);
     }
+
+    public function angleFindings(): HasMany
+    {
+        return $this->hasMany(AngleFinding::class);
+    }
 }
