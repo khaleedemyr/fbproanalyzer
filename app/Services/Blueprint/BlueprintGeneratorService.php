@@ -699,14 +699,15 @@ Angle: {$angle}
 {$copyRules}
 
 WAJIB TEKNIS:
-1) cover_theme = 2 BARIS dipisah " | " (contoh: "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"). UPPERCASE. Max 12 kata total.
-2) image_prompt = 1 prompt lengkap. Bake BOTH lines: the text "BARIS1" on the top line and "BARIS2" directly below in large bold glowing yellow Anton font. User TIDAK edit teks.
-3) motion_prompt = image-to-video {$dur}s, teks tetap tajam/tidak bergeser.
-4) caption WAJIB lengkap (lihat struktur di atas) + hashtag.
+1) cover_theme = 2 BARIS BESAR dipisah " | " (contoh: "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"). UPPERCASE. Max 12 kata total.
+2) image_prompt = 1 prompt lengkap. Bake judul 2 baris BESAR + footer KECIL (lihat aturan di atas). User TIDAK edit teks.
+3) motion_prompt = image-to-video {$dur}s, semua teks tetap tajam/tidak bergeser.
+4) caption WAJIB lengkap (solusi + ajakan like/share/follow) + hashtag.
 5) 1 scene: image_prompt + motion_prompt + on_screen = cover_theme (pakai newline atau " | ").
 
 DILARANG teks klise: {$banned}
 DILARANG cover cuma label tema tanpa solusi (contoh jelek: "TERJEBAK DALAM CINTA BERACUN").
+DILARANG lupa footer kecil "lihat caption" + like/share/follow di image_prompt.
 
 JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 PROMPT;
@@ -745,14 +746,15 @@ Angle: {$angle}
 {$copyRules}
 
 WAJIB TEKNIS:
-1) cover_theme = 2 BARIS dipisah " | " (hook tajam + perintah/solusi). UPPERCASE. Max 12 kata.
-2) image_prompt = 1 prompt generate image. Bake BOTH lines as yellow Anton text. User TIDAK edit teks.
+1) cover_theme = 2 BARIS BESAR dipisah " | " (hook tajam + perintah/solusi). UPPERCASE. Max 12 kata.
+2) image_prompt = 1 prompt generate image. Bake judul 2 baris BESAR + footer KECIL (lihat aturan). User TIDAK edit teks.
 3) motion_prompt = "-"
-4) caption WAJIB ada SOLUSI konkret (bukan cuma diagnosis). + hashtag.
+4) caption WAJIB ada SOLUSI konkret + ajakan like/share/follow + hashtag.
 5) 1 scene saja.
 
 DILARANG: {$banned}
-DILARANG cover cuma label tema. DILARANG caption tanpa solusi.
+DILARANG cover cuma label tema. DILARANG caption tanpa solusi / tanpa CTA engagement.
+DILARANG lupa footer kecil di image_prompt.
 
 JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 PROMPT;
@@ -760,13 +762,20 @@ PROMPT;
 
     protected function visualCopyRulesForPrompt(): string
     {
-        return <<<'TXT'
+        $footer1 = $this->imageFooterLine1();
+        $footer2 = $this->imageFooterLine2();
+        $cta = $this->engagementCtaLine();
+
+        return <<<TXT
 ===== PESAN HARUS JELAS (ANTI ABU-ABU) =====
 Teks di gambar = yang orang baca dalam 1 detik. Harus ada:
-- Baris 1: diagnosis / kontradiksi tajam (bukan judul tema generik)
-- Baris 2: SOLUSI / perintah aksi (pergi, putus pola, set batas, tolak, dll)
+- Baris 1 (BESAR): diagnosis / kontradiksi tajam (bukan judul tema generik)
+- Baris 2 (BESAR): SOLUSI / perintah aksi (pergi, putus pola, set batas, tolak, dll)
+- Footer KECIL di bawah gambar (wajib, lebih kecil dari judul, tidak menyaingi judul):
+  1) "{$footer1}"
+  2) "{$footer2}"
 
-Contoh BAGUS:
+Contoh BAGUS cover_theme:
 - "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"
 - "MERASA BERSALAH TERUS? | ITU BUKAN CINTA — ITU KONTROL"
 - "JANGAN JAWAB PERTANYAAN JEBAKAN | BALIKKAN BINGKAINYA"
@@ -779,9 +788,10 @@ CAPTION WAJIB struktur:
 1) 1 kalimat hook (masalah spesifik)
 2) 1–2 kalimat insight (kenapa berbahaya)
 3) Blok "Solusi:" berisi 2–3 langkah konkret yang bisa dilakukan hari ini
-4) CTA singkat + hashtag
+4) Ajakan engagement: {$cta}
+5) hashtag
 
-Caption tanpa solusi = GAGAL.
+Caption tanpa solusi ATAU tanpa ajakan like/share/follow = GAGAL.
 TXT;
     }
 
@@ -1437,8 +1447,8 @@ TXT;
             $payload['scenes'][0]['on_screen'] = str_replace(' | ', "\n", $cover);
             $img = trim((string) ($payload['scenes'][0]['image_prompt'] ?? ''));
             if ($coverWasVague || $img === '' || ! $this->promptHasCoverLines($img, $line1, $line2)) {
-                if ($img !== '' && ! $coverWasVague) {
-                    // Prompt visual bagus — sisipkan teks 2 baris saja.
+                if ($img !== '' && ! $coverWasVague && str_contains($img, '"'.$line1.'"')) {
+                    // Prompt visual + judul ada — sisipkan footer kecil / lengkapi teks.
                     $payload['scenes'][0]['image_prompt'] = rtrim($img, " \t\n\r\0\x0B.").'. '.$textClause.'.';
                 } else {
                     $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo with yellow rubber duck';
@@ -1456,25 +1466,24 @@ TXT;
     protected function ensureSolutionCaption(string $caption, string $coverTheme, string $topic, BrandKit $kit): string
     {
         $caption = trim($caption);
-        if ($caption !== '' && ! $this->captionMissingSolution($caption)) {
-            return $caption;
-        }
-
         $copy = $this->punchyVisualCopy($this->spokenTheme($coverTheme, $topic), null, $kit);
         if ($caption === '') {
             return $copy['caption'];
         }
 
-        // Caption ada tapi tanpa solusi — tempel blok solusi.
         $hashtags = trim((string) ($kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral'));
         $body = preg_replace('/\n?\.(\n\.)+\n?.*/s', '', $caption) ?? $caption;
         $body = trim(preg_replace('/#\w+/u', '', $body) ?? $body);
+        $body = trim(preg_replace('/\n*(Like,? share.*|like · share.*|Follow untuk konten.*|Simpan\. Share ke.*)$/iu', '', $body) ?? $body);
 
-        return $body."\n\nSolusi:\n"
-            ."- Sadari polanya, jangan normalisasi rasa cemas/bersalah yang dipelihara orang lain.\n"
-            ."- Set batas jelas: kontak, topik, dan akses emosional yang merusakmu.\n"
-            ."- Kalau mereka menolak batasmu, itu bukti — bukan alasan untuk bertahan.\n\n"
-            ."Simpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags;
+        if ($this->captionMissingSolution($body)) {
+            $body .= "\n\nSolusi:\n"
+                ."- Sadari polanya, jangan normalisasi rasa cemas/bersalah yang dipelihara orang lain.\n"
+                ."- Set batas jelas: kontak, topik, dan akses emosional yang merusakmu.\n"
+                ."- Kalau mereka menolak batasmu, itu bukti — bukan alasan untuk bertahan.";
+        }
+
+        return $body."\n\n".$this->engagementCtaLine()."\n.\n.\n.\n".$hashtags;
     }
 
     /**
@@ -1534,7 +1543,7 @@ TXT;
             .'- '.$steps[0]."\n"
             .'- '.$steps[1]."\n"
             .'- '.$steps[2]."\n\n"
-            ."Simpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags;
+            .$this->engagementCtaLine()."\n.\n.\n.\n".$hashtags;
 
         return [
             'cover' => $cover,
@@ -1563,14 +1572,35 @@ TXT;
         return [$line1, $line2];
     }
 
+    protected function imageFooterLine1(): string
+    {
+        return 'Lihat caption selengkapnya';
+    }
+
+    protected function imageFooterLine2(): string
+    {
+        return 'Like · Share · Follow untuk konten psikologi lainnya';
+    }
+
+    protected function engagementCtaLine(): string
+    {
+        return 'Like, share, dan follow buat konten psikologi lainnya. 👇';
+    }
+
     protected function bakedTextClause(string $line1, string $line2): string
     {
-        return 'At the top of the image, the text "'.$line1.'" is boldly displayed on the first line and the text "'.$line2.'" directly below it on the second line, both in a large modern glowing yellow Anton-style font with a dark drop shadow, perfectly readable';
+        $f1 = $this->imageFooterLine1();
+        $f2 = $this->imageFooterLine2();
+
+        return 'At the top of the image, the text "'.$line1.'" is boldly displayed on the first line and the text "'.$line2.'" directly below it on the second line, both in a large modern glowing yellow Anton-style font with a dark drop shadow, perfectly readable. Near the bottom of the image, in much smaller subtle soft-white text (about 20-30% the size of the main title, low visual weight, not competing with the headline), include the exact text "'.$f1.'" and directly under it "'.$f2.'"';
     }
 
     protected function promptHasCoverLines(string $prompt, string $line1, string $line2): bool
     {
-        return str_contains($prompt, '"'.$line1.'"') && str_contains($prompt, '"'.$line2.'"');
+        return str_contains($prompt, '"'.$line1.'"')
+            && str_contains($prompt, '"'.$line2.'"')
+            && str_contains($prompt, '"'.$this->imageFooterLine1().'"')
+            && str_contains($prompt, '"'.$this->imageFooterLine2().'"');
     }
 
     protected function looksLikeVagueCover(string $cover): bool

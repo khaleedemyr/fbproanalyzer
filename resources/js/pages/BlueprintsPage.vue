@@ -183,8 +183,8 @@ onMounted(load);
             <p class="mt-2 text-xs text-slate-500">
                 <template v-if="isVo">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
                 <template v-else-if="isLong">Golden Hook → Bab → Penutup · beat 5 dtk · bumper tiap bab · visual mayoritas stock/black.</template>
-                <template v-else-if="isText">1 prompt image (teks sudah di gambar) + prompt image-to-video + caption. Tanpa edit teks lagi.</template>
-                <template v-else>1 prompt generate image saja — teks judul sudah baked-in di prompt.</template>
+                <template v-else-if="isText">Image (judul 2 baris + footer kecil “lihat caption” / like-share-follow) → i2v → caption ber-solusi + CTA.</template>
+                <template v-else>1 prompt image (judul 2 baris + footer kecil lihat caption / like-share-follow) + caption ber-solusi + CTA.</template>
             </p>
             <form class="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]" @submit.prevent="generate">
                 <input

@@ -160,10 +160,10 @@ onMounted(load);
                     Naskah: {{ durationLabel || '-' }} total · tiap beat {{ beatSeconds }} detik · sudut pandang “{{ bp.voice_perspective || 'Aku' }}”
                 </p>
                 <p v-else-if="bp && isText" class="mt-1 text-xs text-slate-500">
-                    Teks di gambar sudah baked-in · generate image → image-to-video {{ durationLabel }} · caption
+                    Judul 2 baris + footer kecil “lihat caption / like·share·follow” · i2v {{ durationLabel }} · caption + CTA
                 </p>
                 <p v-else-if="bp && isFoto" class="mt-1 text-xs text-slate-500">
-                    Teks di gambar sudah baked-in · cukup generate image, tanpa edit teks
+                    Judul 2 baris + footer kecil “lihat caption / like·share·follow” · caption ber-solusi + CTA
                 </p>
             </div>
             <div v-if="bp" class="flex flex-wrap items-end gap-2">
@@ -213,7 +213,9 @@ onMounted(load);
             <template v-if="isVisual">
                 <section class="rounded-xl border border-slate-200 bg-white p-5">
                     <h3 class="font-semibold text-slate-900">🎨 Prompt Generate Image</h3>
-                    <p class="mt-1 text-xs text-slate-500">Teks “{{ bp.cover_theme }}” sudah di dalam prompt — generate langsung, tanpa edit teks.</p>
+                    <p class="mt-1 text-xs text-slate-500">
+                        Judul “{{ bp.cover_theme }}” + footer kecil “Lihat caption selengkapnya” / like·share·follow — generate langsung, tanpa edit teks.
+                    </p>
                     <p class="mt-2 text-xs leading-relaxed text-slate-700">{{ primaryScene.image_prompt || bp.thumbnail_prompt }}</p>
                     <button class="mt-2 text-xs text-teal-700" @click="copyText(primaryScene.image_prompt || bp.thumbnail_prompt)">Copy prompt image</button>
                 </section>
