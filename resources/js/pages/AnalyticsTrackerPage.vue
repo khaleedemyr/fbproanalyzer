@@ -17,7 +17,6 @@ const summary = computed(() => data.value?.summary || {});
 const formulas = computed(() => data.value?.winning_formulas || []);
 const trend = computed(() => data.value?.daily_trend || []);
 const movers = computed(() => data.value?.movers || []);
-const topMeta = computed(() => data.value?.top_meta || []);
 const youtube = computed(() => data.value?.youtube || []);
 const ytOauth = computed(() => data.value?.youtube_oauth || null);
 const maxTrendViews = computed(() => Math.max(1, ...trend.value.map((r) => Number(r.views || 0))));
@@ -68,9 +67,9 @@ async function syncAll() {
         const res = await http.post('/analytics/sync', { days: 30 }, { timeout: 180000 });
         if (res.data.data) data.value = res.data.data;
         const r = res.data.result || {};
-        message.value = `${res.data.message} · Meta ${r.meta_synced || 0} post · YT ${r.youtube_synced || 0} · snapshot ${r.snapshots || 0}`;
+        message.value = `${res.data.message} · YT ${r.youtube_synced || 0} video · snapshot ${r.snapshots || 0}`;
         warnings.value = r.warnings || [];
-        if ((r.warnings || []).length && (r.meta_synced || 0) + (r.youtube_synced || 0) === 0) {
+        if ((r.warnings || []).length && (r.youtube_synced || 0) === 0) {
             error.value = r.warnings[0];
         }
     } catch (e) {
@@ -135,7 +134,7 @@ onMounted(() => {
             <div>
                 <h2 class="text-2xl font-semibold text-slate-900">Analytics Tracker</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                    Tarik performa harian (views, share, retention) dari Meta Page + YouTube tracked — deteksi formula yang lagi disukai algoritma bulan ini.
+                    Tarik performa harian YouTube (views, retention, engagement) dari channel yang terhubung — deteksi formula yang lagi naik.
                 </p>
             </div>
             <button
@@ -164,25 +163,25 @@ onMounted(() => {
                     <p class="text-xs text-slate-500">Δ hari ini {{ Number(summary.delta_views_today || 0).toLocaleString('id-ID') }}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
-                    <p class="text-xs uppercase tracking-wide text-slate-500">Total shares</p>
-                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ Number(summary.total_shares || 0).toLocaleString('id-ID') }}</p>
+                    <p class="text-xs uppercase tracking-wide text-slate-500">Video tracked</p>
+                    <p class="mt-2 text-2xl font-semibold text-slate-900">{{ Number(summary.youtube_tracked || 0).toLocaleString('id-ID') }}</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                     <p class="text-xs uppercase tracking-wide text-slate-500">Avg retention</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ summary.avg_retention || 0 }}%</p>
-                    <p class="text-xs text-slate-500">dari video Meta yang punya data watch</p>
+                    <p class="text-xs text-slate-500">dari YouTube Analytics (OAuth)</p>
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                     <p class="text-xs uppercase tracking-wide text-slate-500">Avg viral score</p>
                     <p class="mt-2 text-2xl font-semibold text-slate-900">{{ summary.avg_viral_score || 0 }}</p>
-                    <p class="text-xs text-slate-500">{{ summary.meta_posts || 0 }} Meta · {{ summary.youtube_tracked || 0 }} YT</p>
+                    <p class="text-xs text-slate-500">{{ summary.youtube_tracked || 0 }} video YouTube</p>
                 </div>
             </div>
 
             <section class="rounded-xl border border-slate-200 bg-white p-5">
                 <h3 class="font-semibold text-slate-900">Formula yang disukai algoritma bulan ini</h3>
                 <p class="mt-1 text-xs text-slate-500">Dikelompokkan dari format × topik. Bandingkan skor vs bulan lalu.</p>
-                <div v-if="!formulas.length" class="mt-4 text-sm text-slate-500">Belum ada data formula. Sync Meta Page dulu.</div>
+                <div v-if="!formulas.length" class="mt-4 text-sm text-slate-500">Belum ada data formula. Hubungkan YouTube lalu sync.</div>
                 <div v-else class="mt-4 overflow-x-auto">
                     <table class="min-w-full text-left text-sm">
                         <thead class="border-b border-slate-100 text-xs uppercase text-slate-500">
@@ -237,50 +236,33 @@ onMounted(() => {
                 </div>
             </section>
 
-            <div class="grid gap-6 lg:grid-cols-2">
-                <section class="rounded-xl border border-slate-200 bg-white p-5">
-                    <h3 class="font-semibold text-slate-900">Movers hari ini (Δ views)</h3>
-                    <ul class="mt-3 divide-y divide-slate-100">
-                        <li v-for="(m, i) in movers" :key="i" class="flex items-start justify-between gap-2 py-2">
-                            <div class="min-w-0">
-                                <p class="truncate text-sm font-medium text-slate-900">{{ m.title || m.external_id }}</p>
-                                <p class="text-xs text-slate-500">
-                                    {{ m.platform }} · {{ formulaLabel(m.formula_key) }}
-                                    <span v-if="m.retention_rate"> · ret {{ m.retention_rate }}%</span>
-                                </p>
-                            </div>
-                            <span
-                                class="shrink-0 text-sm font-semibold"
-                                :class="m.delta_views >= 0 ? 'text-emerald-700' : 'text-rose-700'"
-                            >
-                                {{ m.delta_views >= 0 ? '+' : '' }}{{ Number(m.delta_views).toLocaleString('id-ID') }}
-                            </span>
-                        </li>
-                        <li v-if="!movers.length" class="py-3 text-sm text-slate-500">Belum ada perbandingan harian. Sync 2 hari berturut-turut.</li>
-                    </ul>
-                </section>
-
-                <section class="rounded-xl border border-slate-200 bg-white p-5">
-                    <h3 class="font-semibold text-slate-900">Top Meta posts</h3>
-                    <ul class="mt-3 divide-y divide-slate-100">
-                        <li v-for="p in topMeta" :key="p.id" class="py-2">
+            <section class="rounded-xl border border-slate-200 bg-white p-5">
+                <h3 class="font-semibold text-slate-900">Movers hari ini (Δ views)</h3>
+                <ul class="mt-3 divide-y divide-slate-100">
+                    <li v-for="(m, i) in movers" :key="i" class="flex items-start justify-between gap-2 py-2">
+                        <div class="min-w-0">
                             <a
-                                :href="p.permalink || undefined"
-                                :target="p.permalink ? '_blank' : undefined"
-                                class="text-sm font-medium text-slate-900 hover:underline"
-                            >
-                                {{ p.message || '(tanpa caption)' }}
-                            </a>
-                            <p class="mt-1 text-xs text-slate-500">
-                                {{ formulaLabel(p.formula_key) }} · views {{ Number(p.views).toLocaleString('id-ID') }}
-                                · share {{ p.shares }} · viral {{ p.viral_score }}
-                                <span v-if="p.retention_rate"> · ret {{ p.retention_rate }}%</span>
+                                v-if="m.permalink"
+                                :href="m.permalink"
+                                target="_blank"
+                                class="truncate text-sm font-medium text-slate-900 hover:underline"
+                            >{{ m.title || m.external_id }}</a>
+                            <p v-else class="truncate text-sm font-medium text-slate-900">{{ m.title || m.external_id }}</p>
+                            <p class="text-xs text-slate-500">
+                                {{ formulaLabel(m.formula_key) }}
+                                <span v-if="m.retention_rate"> · ret {{ m.retention_rate }}%</span>
                             </p>
-                        </li>
-                        <li v-if="!topMeta.length" class="py-3 text-sm text-slate-500">Belum ada post Meta. Hubungkan Page di Akun Meta lalu sync.</li>
-                    </ul>
-                </section>
-            </div>
+                        </div>
+                        <span
+                            class="shrink-0 text-sm font-semibold"
+                            :class="m.delta_views >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                        >
+                            {{ m.delta_views >= 0 ? '+' : '' }}{{ Number(m.delta_views).toLocaleString('id-ID') }}
+                        </span>
+                    </li>
+                    <li v-if="!movers.length" class="py-3 text-sm text-slate-500">Belum ada perbandingan harian. Sync 2 hari berturut-turut.</li>
+                </ul>
+            </section>
 
             <section class="rounded-xl border border-slate-200 bg-white p-5">
                 <div class="flex flex-wrap items-start justify-between gap-3">

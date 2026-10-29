@@ -50,7 +50,7 @@ class AnalyticsTrackerController extends Controller
             $result['warnings'][] = 'Sync data ok, tapi dashboard gagal di-render: '.$e->getMessage();
         }
 
-        $syncedSomething = (($result['meta_synced'] ?? 0) + ($result['youtube_synced'] ?? 0) + ($result['snapshots'] ?? 0)) > 0;
+        $syncedSomething = (($result['youtube_synced'] ?? 0) + ($result['snapshots'] ?? 0)) > 0;
         $warnings = $result['warnings'] ?? [];
 
         return response()->json([

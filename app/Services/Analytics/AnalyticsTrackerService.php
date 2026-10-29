@@ -26,28 +26,13 @@ class AnalyticsTrackerService
     }
 
     /**
+     * Analytics Tracker syncs YouTube only (channel OAuth + tracked videos).
+     *
      * @return array{meta_synced:int,youtube_synced:int,snapshots:int,warnings:array<int,string>,accounts:int}
      */
     public function syncAll(User $user): array
     {
         $warnings = [];
-        $metaSynced = 0;
-        $accounts = 0;
-
-        $pages = $user->metaAccounts()->where('type', 'page')->whereNotNull('access_token')->get();
-        foreach ($pages as $account) {
-            $accounts++;
-            try {
-                $metaSynced += $this->syncMetaAccount($user, $account);
-            } catch (\Throwable $e) {
-                $warnings[] = 'Meta '.$account->name.': '.$e->getMessage();
-                Log::warning('Analytics Meta sync: '.$e->getMessage());
-            }
-        }
-
-        if ($pages->isEmpty()) {
-            $warnings[] = 'Belum ada Meta Page dengan token. Hubungkan akun di menu Akun Meta, lalu Sync Insights.';
-        }
 
         $ytOauth = $this->youtubeAnalytics->syncUser($user);
         $warnings = array_merge($warnings, $ytOauth['warnings']);
@@ -64,12 +49,12 @@ class AnalyticsTrackerService
         }
 
         return [
-            'meta_synced' => $metaSynced,
+            'meta_synced' => 0,
             'youtube_synced' => $ytOauth['synced'] + $yt['synced'],
             'youtube_analytics_synced' => $ytOauth['synced'],
             'snapshots' => $snapshots,
             'warnings' => $warnings,
-            'accounts' => $accounts,
+            'accounts' => 0,
         ];
     }
 
@@ -219,46 +204,6 @@ class AnalyticsTrackerService
         $today = now()->toDateString();
         $count = 0;
 
-        foreach (ContentPost::query()->where('user_id', $user->id)->cursor() as $post) {
-            $prev = AnalyticsSnapshot::query()
-                ->where('user_id', $user->id)
-                ->where('platform', 'meta')
-                ->where('external_id', $post->meta_post_id)
-                ->where('snapshot_date', '<', $today)
-                ->orderByDesc('snapshot_date')
-                ->first();
-
-            AnalyticsSnapshot::query()->updateOrCreate(
-                [
-                    'platform' => 'meta',
-                    'external_id' => $post->meta_post_id,
-                    'snapshot_date' => $today,
-                ],
-                [
-                    'user_id' => $user->id,
-                    'content_post_id' => $post->id,
-                    'views' => (int) $post->views,
-                    'impressions' => (int) $post->impressions,
-                    'reach' => (int) $post->reach,
-                    'likes' => (int) $post->likes,
-                    'comments' => (int) $post->comments,
-                    'shares' => (int) $post->shares,
-                    'saves' => (int) $post->saves,
-                    'avg_watch_seconds' => (float) $post->avg_watch_seconds,
-                    'retention_rate' => (float) $post->retention_rate,
-                    'engagement_rate' => (float) $post->engagement_rate,
-                    'viral_score' => (float) $post->viral_score,
-                    'delta_views' => (int) $post->views - (int) ($prev->views ?? 0),
-                    'delta_shares' => (int) $post->shares - (int) ($prev->shares ?? 0),
-                    'format' => $post->format,
-                    'topic_cluster' => $post->topic_cluster,
-                    'formula_key' => $post->formula_key ?: $this->scorer->formulaKey($post->format, $post->topic_cluster),
-                    'raw' => ['source' => 'meta_content_post'],
-                ]
-            );
-            $count++;
-        }
-
         foreach (TrackedYoutubeVideo::query()->where('user_id', $user->id)->cursor() as $yt) {
             $prev = AnalyticsSnapshot::query()
                 ->where('user_id', $user->id)
@@ -275,8 +220,10 @@ class AnalyticsTrackerService
                 'comments' => (int) $yt->comments,
                 'shares' => 0,
                 'saves' => 0,
+                'views' => (int) $yt->views,
             ];
-            $formula = $yt->formula_tag ?: $this->scorer->formulaKey('video', 'youtube');
+            $topic = $yt->formula_tag ?: $this->scorer->detectTopicCluster($yt->title);
+            $formula = $this->scorer->formulaKey($yt->format ?: 'video', $topic);
 
             AnalyticsSnapshot::query()->updateOrCreate(
                 [
@@ -301,7 +248,7 @@ class AnalyticsTrackerService
                     'delta_views' => (int) $yt->views - (int) ($prev->views ?? 0),
                     'delta_shares' => 0,
                     'format' => $yt->format ?: 'video',
-                    'topic_cluster' => $yt->formula_tag,
+                    'topic_cluster' => $topic,
                     'formula_key' => $formula,
                     'raw' => [
                         'title' => $yt->title,
@@ -326,22 +273,17 @@ class AnalyticsTrackerService
         $prevMonthStart = now()->subMonthNoOverflow()->startOfMonth();
         $prevMonthEnd = (clone $monthStart)->subSecond();
 
-        $posts = ContentPost::query()
-            ->where('user_id', $user->id)
-            ->orderByDesc('viral_score')
-            ->limit(200)
-            ->get();
-
         $yt = TrackedYoutubeVideo::query()->where('user_id', $user->id)->orderByDesc('views')->get();
 
         $todaySnaps = AnalyticsSnapshot::query()
             ->where('user_id', $user->id)
+            ->where('platform', 'youtube')
             ->whereDate('snapshot_date', now()->toDateString())
-            ->with('contentPost:id,message,permalink')
             ->get();
 
         $trend = AnalyticsSnapshot::query()
             ->where('user_id', $user->id)
+            ->where('platform', 'youtube')
             ->where('snapshot_date', '>=', $from->toDateString())
             ->selectRaw('snapshot_date, SUM(views) as views, SUM(shares) as shares, SUM(likes) as likes, AVG(retention_rate) as retention_avg, SUM(delta_views) as delta_views')
             ->groupBy('snapshot_date')
@@ -369,7 +311,7 @@ class AnalyticsTrackerService
             ->take(12)
             ->values()
             ->map(fn ($s) => [
-                'platform' => $s->platform,
+                'platform' => 'youtube',
                 'external_id' => $s->external_id,
                 'format' => $s->format,
                 'formula_key' => $s->formula_key,
@@ -379,42 +321,42 @@ class AnalyticsTrackerService
                 'delta_views' => (int) $s->delta_views,
                 'delta_shares' => (int) $s->delta_shares,
                 'viral_score' => (float) $s->viral_score,
-                'title' => $s->platform === 'youtube'
-                    ? data_get($s->raw, 'title')
-                    : Str::limit((string) optional($s->contentPost)->message, 80, '…'),
-                'permalink' => $s->platform === 'youtube'
-                    ? data_get($s->raw, 'url')
-                    : optional($s->contentPost)->permalink,
+                'title' => data_get($s->raw, 'title') ?: $s->external_id,
+                'permalink' => data_get($s->raw, 'url'),
             ]);
+
+        $scoredYt = $yt->map(function ($v) {
+            $reach = max(1, (int) $v->views);
+            $metrics = [
+                'reach' => $reach,
+                'likes' => (int) $v->likes,
+                'comments' => (int) $v->comments,
+                'shares' => 0,
+                'saves' => 0,
+                'views' => (int) $v->views,
+            ];
+
+            return [
+                'viral_score' => $this->scorer->score($metrics),
+                'engagement_rate' => $this->scorer->engagementRate($metrics),
+                'retention_rate' => (float) ($v->retention_rate ?? 0),
+            ];
+        });
 
         return [
             'summary' => [
-                'meta_posts' => $posts->count(),
+                'meta_posts' => 0,
                 'youtube_tracked' => $yt->count(),
-                'total_views' => (int) $posts->sum('views') + (int) $yt->sum('views'),
-                'total_shares' => (int) $posts->sum('shares'),
-                'avg_retention' => round((float) $posts->avg('retention_rate'), 2),
-                'avg_viral_score' => round((float) $posts->avg('viral_score'), 2),
+                'total_views' => (int) $yt->sum('views'),
+                'total_shares' => 0,
+                'avg_retention' => round((float) $yt->avg('retention_rate'), 2),
+                'avg_viral_score' => round((float) $scoredYt->avg('viral_score'), 2),
                 'delta_views_today' => (int) $todaySnaps->sum('delta_views'),
             ],
             'winning_formulas' => $winning,
             'daily_trend' => $trend,
             'movers' => $movers,
-            'top_meta' => $posts->take(10)->map(fn ($p) => [
-                'id' => $p->id,
-                'format' => $p->format,
-                'topic_cluster' => $p->topic_cluster,
-                'formula_key' => $p->formula_key,
-                'views' => (int) $p->views,
-                'shares' => (int) $p->shares,
-                'retention_rate' => (float) $p->retention_rate,
-                'avg_watch_seconds' => (float) $p->avg_watch_seconds,
-                'viral_score' => (float) $p->viral_score,
-                'engagement_rate' => (float) $p->engagement_rate,
-                'published_at' => optional($p->published_at)?->toDateTimeString(),
-                'permalink' => $p->permalink,
-                'message' => Str::limit((string) $p->message, 100, '…'),
-            ]),
+            'top_meta' => [],
             'youtube' => $yt->map(fn ($v) => [
                 'id' => $v->id,
                 'video_id' => $v->video_id,
@@ -433,7 +375,7 @@ class AnalyticsTrackerService
             'youtube_configured' => filled(config('radar.youtube_api_key')),
             'youtube_oauth_configured' => filled(config('youtube.client_id')) && filled(config('youtube.client_secret')),
             'youtube_oauth' => $this->youtubeOauthSummary($user),
-            'meta_pages' => $user->metaAccounts()->where('type', 'page')->count(),
+            'meta_pages' => 0,
         ];
     }
 
@@ -462,18 +404,48 @@ class AnalyticsTrackerService
      */
     public function formulaLeaderboard(User $user, Carbon $from, Carbon $to): array
     {
-        $posts = ContentPost::query()
+        $videos = TrackedYoutubeVideo::query()
             ->where('user_id', $user->id)
-            ->whereBetween('published_at', [$from, $to])
+            ->where(function ($q) use ($from, $to) {
+                $q->whereBetween('published_at', [$from, $to])
+                    ->orWhere(function ($q2) use ($from, $to) {
+                        $q2->whereNull('published_at')
+                            ->whereBetween('updated_at', [$from, $to]);
+                    });
+            })
             ->get();
 
-        if ($posts->isEmpty()) {
-            // fallback: all posts if month empty
-            $posts = ContentPost::query()->where('user_id', $user->id)->get();
+        if ($videos->isEmpty()) {
+            $videos = TrackedYoutubeVideo::query()->where('user_id', $user->id)->get();
         }
 
-        return $posts
-            ->groupBy(fn ($p) => $p->formula_key ?: $this->scorer->formulaKey($p->format, $p->topic_cluster))
+        $rows = $videos->map(function ($v) {
+            $topic = $v->formula_tag ?: $this->scorer->detectTopicCluster($v->title);
+            $format = $v->format ?: 'video';
+            $reach = max(1, (int) $v->views);
+            $metrics = [
+                'reach' => $reach,
+                'likes' => (int) $v->likes,
+                'comments' => (int) $v->comments,
+                'shares' => 0,
+                'saves' => 0,
+                'views' => (int) $v->views,
+            ];
+
+            return (object) [
+                'formula_key' => $this->scorer->formulaKey($format, $topic),
+                'format' => $format,
+                'topic_cluster' => $topic,
+                'views' => (int) $v->views,
+                'likes' => (int) $v->likes,
+                'retention_rate' => (float) ($v->retention_rate ?? 0),
+                'viral_score' => $this->scorer->score($metrics),
+                'engagement_rate' => $this->scorer->engagementRate($metrics),
+            ];
+        });
+
+        return $rows
+            ->groupBy('formula_key')
             ->map(function ($group, $key) {
                 [$format, $topic] = array_pad(explode('|', (string) $key, 2), 2, 'umum');
 
@@ -486,8 +458,8 @@ class AnalyticsTrackerService
                     'avg_engagement' => round((float) $group->avg('engagement_rate'), 2),
                     'avg_retention' => round((float) $group->avg('retention_rate'), 2),
                     'total_views' => (int) $group->sum('views'),
-                    'total_shares' => (int) $group->sum('shares'),
-                    'share_rate' => round(((int) $group->sum('shares') / max(1, (int) $group->sum('views'))) * 100, 2),
+                    'total_shares' => 0,
+                    'share_rate' => 0,
                 ];
             })
             ->sortByDesc('avg_viral_score')
@@ -547,16 +519,16 @@ class AnalyticsTrackerService
     protected function buildInsight(array $winning): string
     {
         if ($winning === []) {
-            return 'Belum ada data cukup. Sync Meta Page / tambah video YouTube, lalu sync lagi besok untuk lihat delta harian.';
+            return 'Belum ada data cukup. Hubungkan YouTube / tambah video, lalu sync lagi besok untuk lihat delta harian.';
         }
 
         $top = $winning[0];
         $rising = collect($winning)->firstWhere('trend', 'naik');
 
-        $line = 'Bulan ini algoritma paling suka formula '
+        $line = 'Bulan ini performa YouTube paling kuat di formula '
             .strtoupper((string) $top['format']).' × '.($top['topic_cluster'] ?? 'umum')
             .' (skor viral rata-rata '.$top['avg_viral_score']
-            .', share rate '.$top['share_rate'].'%).';
+            .', retention rata-rata '.$top['avg_retention'].'%).';
 
         if ($rising) {
             $line .= ' Yang sedang naik vs bulan lalu: '
