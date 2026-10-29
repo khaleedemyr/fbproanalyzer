@@ -114,6 +114,11 @@ class BlueprintGeneratorService
         }
 
         $payload['cover_theme'] = Str::upper(trim((string) ($payload['cover_theme'] ?: $cleanTitle)));
+
+        if ($this->isVisualPostFormat($format)) {
+            $payload = $this->ensureVisualClarity($payload, $cleanTopic, $idea, $kit, $format);
+        }
+
         $payload['scenes'] = $this->ensureSceneTimecodes($payload['scenes'] ?? []);
         $payload['thumbnail_prompt'] = $this->ensureImagePromptHasText(
             (string) ($payload['thumbnail_prompt'] ?? ''),
@@ -133,13 +138,16 @@ class BlueprintGeneratorService
             if (trim((string) ($payload['thumbnail_prompt'] ?? '')) === '') {
                 $payload['thumbnail_prompt'] = $payload['scenes'][0]['image_prompt'];
             }
-            if (empty($payload['scenes'][0]['on_screen'])) {
-                $payload['scenes'][0]['on_screen'] = (string) $payload['cover_theme'];
-            }
+            $payload['scenes'][0]['on_screen'] = (string) ($payload['scenes'][0]['on_screen'] ?: $payload['cover_theme']);
         }
 
-        if ($format === self::FORMAT_FOTO) {
-            $payload['caption'] = trim((string) ($payload['caption'] ?? ''));
+        if ($this->isVisualPostFormat($format)) {
+            $payload['caption'] = $this->ensureSolutionCaption(
+                (string) ($payload['caption'] ?? ''),
+                (string) $payload['cover_theme'],
+                $cleanTopic,
+                $kit
+            );
         } else {
             $payload['caption'] = $this->ensureCaption(
                 (string) ($payload['caption'] ?? ''),
@@ -667,12 +675,14 @@ TXT;
         $angle = $idea?->angle ?: '';
         $radarBlock = $radarContext !== '' ? "Konteks riset (jangan masuk prompt):\n{$radarContext}\n" : '';
         $dur = max(5, $this->durationSeconds);
-        $cover = Str::upper(Str::limit($title, 48, ''));
         $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo + yellow rubber duck';
         $banned = $this->bannedHookPhrasesForPrompt();
+        $copyRules = $this->visualCopyRulesForPrompt();
 
         return <<<PROMPT
 Kamu buat blueprint REELS TEXT TEMPEL (gambar diam → image-to-video) untuk brand "{$kit->name}".
+Tujuan: orang yang scroll LANGSUNG paham masalah + solusinya. Jangan abu-abu.
+
 Karakter: {$kit->character_name} — {$char}
 Style: {$kit->visual_style}
 Aspect: {$kit->aspect_ratio}
@@ -686,17 +696,19 @@ Hook: {$hook}
 Angle: {$angle}
 {$radarBlock}
 
-WAJIB:
-1) cover_theme = teks pendek clickbait (max ~8 kata), UPPERCASE. Contoh: "{$cover}"
-2) image_prompt = 1 prompt Leonardo/Flux lengkap. TEKS JUDUL HARUS sudah di dalam gambar: tulis exact the text "JUDUL" in large bold glowing yellow Anton-style font. User TIDAK akan edit teks lagi.
-3) motion_prompt = prompt image-to-video (Kling/Runway/Luma): gerakan kamera halus, {$dur}s, jangan ubah/hapus teks di gambar.
-4) caption = caption FB siap salin + hashtag.
-5) 1 scene saja di scenes[] dengan image_prompt + motion_prompt + on_screen = cover_theme.
+{$copyRules}
+
+WAJIB TEKNIS:
+1) cover_theme = 2 BARIS dipisah " | " (contoh: "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"). UPPERCASE. Max 12 kata total.
+2) image_prompt = 1 prompt lengkap. Bake BOTH lines: the text "BARIS1" on the top line and "BARIS2" directly below in large bold glowing yellow Anton font. User TIDAK edit teks.
+3) motion_prompt = image-to-video {$dur}s, teks tetap tajam/tidak bergeser.
+4) caption WAJIB lengkap (lihat struktur di atas) + hashtag.
+5) 1 scene: image_prompt + motion_prompt + on_screen = cover_theme (pakai newline atau " | ").
 
 DILARANG teks klise: {$banned}
+DILARANG cover cuma label tema tanpa solusi (contoh jelek: "TERJEBAK DALAM CINTA BERACUN").
 
 JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
-thumbnail_prompt boleh sama dengan image_prompt.
 PROMPT;
     }
 
@@ -710,16 +722,19 @@ PROMPT;
         $hook = $idea?->hook ?: '';
         $angle = $idea?->angle ?: '';
         $radarBlock = $radarContext !== '' ? "Konteks riset (jangan masuk prompt):\n{$radarContext}\n" : '';
-        $cover = Str::upper(Str::limit($title, 48, ''));
         $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo + yellow rubber duck';
         $banned = $this->bannedHookPhrasesForPrompt();
+        $copyRules = $this->visualCopyRulesForPrompt();
 
         return <<<PROMPT
-Kamu buat blueprint POSTINGAN FOTO (single image) untuk brand "{$kit->name}".
+Kamu buat blueprint POSTINGAN FOTO untuk brand "{$kit->name}".
+Tujuan: 1 foto = pesan jelas (masalah + solusi). Jangan abu-abu / puitis kosong.
+
 Karakter: {$kit->character_name} — {$char}
 Style: {$kit->visual_style}
-Aspect: {$kit->aspect_ratio} (boleh 4:5 atau 1:1 jika lebih cocok feed, default {$kit->aspect_ratio})
+Aspect: {$kit->aspect_ratio} (boleh 4:5 feed)
 Font teks: {$kit->on_screen_font}
+Hashtag: {$kit->caption_hashtags}
 
 Tema: {$title}
 Topik: {$topic}
@@ -727,17 +742,47 @@ Hook: {$hook}
 Angle: {$angle}
 {$radarBlock}
 
-WAJIB:
-1) cover_theme = teks pendek di foto (max ~8 kata), UPPERCASE. Contoh: "{$cover}"
-2) image_prompt = 1 prompt generate image lengkap. TEKS JUDUL HARUS baked-in: the text "JUDUL" boldly displayed. User TIDAK edit teks lagi.
-3) motion_prompt = "-" (foto, bukan video).
-4) caption boleh kosong atau singkat (opsional).
+{$copyRules}
+
+WAJIB TEKNIS:
+1) cover_theme = 2 BARIS dipisah " | " (hook tajam + perintah/solusi). UPPERCASE. Max 12 kata.
+2) image_prompt = 1 prompt generate image. Bake BOTH lines as yellow Anton text. User TIDAK edit teks.
+3) motion_prompt = "-"
+4) caption WAJIB ada SOLUSI konkret (bukan cuma diagnosis). + hashtag.
 5) 1 scene saja.
 
 DILARANG: {$banned}
+DILARANG cover cuma label tema. DILARANG caption tanpa solusi.
 
 JSON keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 PROMPT;
+    }
+
+    protected function visualCopyRulesForPrompt(): string
+    {
+        return <<<'TXT'
+===== PESAN HARUS JELAS (ANTI ABU-ABU) =====
+Teks di gambar = yang orang baca dalam 1 detik. Harus ada:
+- Baris 1: diagnosis / kontradiksi tajam (bukan judul tema generik)
+- Baris 2: SOLUSI / perintah aksi (pergi, putus pola, set batas, tolak, dll)
+
+Contoh BAGUS:
+- "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"
+- "MERASA BERSALAH TERUS? | ITU BUKAN CINTA — ITU KONTROL"
+- "JANGAN JAWAB PERTANYAAN JEBAKAN | BALIKKAN BINGKAINYA"
+
+Contoh JELEK (dilarang):
+- "TERJEBAK DALAM CINTA BERACUN" (cuma label, tidak ngajarin apa-apa)
+- "PSIKOLOGI GELAP" / "TOXIC RELATIONSHIP"
+
+CAPTION WAJIB struktur:
+1) 1 kalimat hook (masalah spesifik)
+2) 1–2 kalimat insight (kenapa berbahaya)
+3) Blok "Solusi:" berisi 2–3 langkah konkret yang bisa dilakukan hari ini
+4) CTA singkat + hashtag
+
+Caption tanpa solusi = GAGAL.
+TXT;
     }
 
     /**
@@ -1011,34 +1056,34 @@ PROMPT;
     protected function buildReelsTextTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
     {
         $theme = $this->spokenTheme($title, $topic);
-        $cover = Str::upper(Str::limit($theme ?: 'TEKS VIRAL', 48, ''));
+        $copy = $this->punchyVisualCopy($theme, $idea, $kit);
+        $cover = $copy['cover'];
+        [$line1, $line2] = $copy['lines'];
         $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
         $style = $kit->visual_style ?: 'Cinematic 9:16 vertical, Jakarta neon night, high contrast';
-        $hashtags = $kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral';
         $dur = max(5, $this->durationSeconds);
-        $hook = $this->spokenLine($idea?->hook);
-        $captionHook = $hook ?: "{$this->voicePerspective} sadar: {$theme} bukan kebetulan — itu pola.";
+        $textClause = $this->bakedTextClause($line1, $line2);
 
-        $image = "A vertical {$kit->aspect_ratio} cinematic still frame for a text-overlay Instagram/Facebook Reels. {$char} standing in a crowded neon-lit Jakarta street at night, high contrast rim light. {$style}. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow. Clean composition, readable typography, film grain, no offensive elements. --ar 9:16";
+        $image = "A vertical {$kit->aspect_ratio} cinematic still frame for a text-overlay Instagram/Facebook Reels. {$char} standing in a crowded neon-lit Jakarta street at night, high contrast rim light. {$style}. {$textClause} Clean composition, readable typography, film grain, no offensive elements. --ar 9:16";
 
-        $motion = "Image to video, {$dur} seconds. Slow cinematic push-in toward the stickman character while neon bokeh drifts softly. Keep the on-image text \"{$cover}\" perfectly sharp, locked, and fully readable — do not warp, crop, or remove the title. Subtle parallax, natural handheld micro-motion, cinematic color grade.";
+        $motion = "Image to video, {$dur} seconds. Slow cinematic push-in toward the stickman character while neon bokeh drifts softly. Keep both title lines perfectly sharp, locked, and fully readable — do not warp, crop, or remove the text. Subtle parallax, natural handheld micro-motion, cinematic color grade.";
 
         return [
             'title' => Str::limit($theme, 120, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Reels text tempel {$dur}s: generate image (teks baked-in) → image-to-video → caption.",
+            'story_concept' => "Reels text tempel {$dur}s: pesan jelas (masalah + solusi) → image → i2v → caption ber-solusi.",
             'scenes' => [[
                 'section' => 'REELS TEXT TEMPEL',
                 'timecode' => $this->formatTimecode(0, $dur),
                 'visual_type' => 'ai',
                 'vo' => '',
-                'on_screen' => $cover,
+                'on_screen' => str_replace(' | ', "\n", $cover),
                 'image_prompt' => $image,
                 'motion_prompt' => $motion,
                 'beat_seconds' => $dur,
             ]],
             'thumbnail_prompt' => $image,
-            'caption' => $captionHook."\n\nSimpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags,
+            'caption' => $copy['caption'],
             'title_options' => [],
         ];
     }
@@ -1049,29 +1094,32 @@ PROMPT;
     protected function buildFotoTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
     {
         $theme = $this->spokenTheme($title, $topic);
-        $cover = Str::upper(Str::limit($theme ?: 'TEKS VIRAL', 48, ''));
+        $copy = $this->punchyVisualCopy($theme, $idea, $kit);
+        $cover = $copy['cover'];
+        [$line1, $line2] = $copy['lines'];
         $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
         $style = $kit->visual_style ?: 'Cinematic high-contrast urban night';
         $ratio = $kit->aspect_ratio ?: '4:5';
+        $textClause = $this->bakedTextClause($line1, $line2);
 
-        $image = "A vertical {$ratio} cinematic Facebook/Instagram feed photo. {$char} in a moody neon Jakarta alley, sharp focus, editorial lighting. {$style}. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow. Typography must be perfectly readable — no extra editing needed. Ultra sharp, feed-ready, film grain, no offensive elements.";
+        $image = "A vertical {$ratio} cinematic Facebook/Instagram feed photo. {$char} in a moody neon Jakarta alley, sharp focus, editorial lighting. {$style}. {$textClause} Typography must be perfectly readable — no extra editing needed. Ultra sharp, feed-ready, film grain, no offensive elements.";
 
         return [
             'title' => Str::limit($theme, 120, ''),
             'cover_theme' => $cover,
-            'story_concept' => 'Postingan foto: 1 prompt generate image dengan teks judul sudah baked-in.',
+            'story_concept' => 'Postingan foto: teks 2 baris (diagnosis + solusi) baked-in + caption ber-solusi.',
             'scenes' => [[
                 'section' => 'POSTINGAN FOTO',
                 'timecode' => '',
                 'visual_type' => 'ai',
                 'vo' => '',
-                'on_screen' => $cover,
+                'on_screen' => str_replace(' | ', "\n", $cover),
                 'image_prompt' => $image,
                 'motion_prompt' => '-',
                 'beat_seconds' => 0,
             ]],
             'thumbnail_prompt' => $image,
-            'caption' => '',
+            'caption' => $copy['caption'],
             'title_options' => [],
         ];
     }
@@ -1363,14 +1411,209 @@ PROMPT;
         return $this->ensureThumbnailHasTitle($prompt, $coverTheme, $kit, $format);
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function ensureVisualClarity(array $payload, string $topic, ?ContentIdea $idea, BrandKit $kit, string $format): array
+    {
+        $cover = (string) ($payload['cover_theme'] ?? '');
+        $coverWasVague = $this->looksLikeVagueCover($cover);
+        $copy = $this->punchyVisualCopy($this->spokenTheme($cover !== '' ? $cover : $topic, $topic), $idea, $kit);
+
+        if ($coverWasVague) {
+            $payload['cover_theme'] = $copy['cover'];
+            $cover = $copy['cover'];
+        }
+
+        if ($this->captionMissingSolution((string) ($payload['caption'] ?? ''))) {
+            $payload['caption'] = $copy['caption'];
+        }
+
+        [$line1, $line2] = $this->splitCoverLines($cover);
+        $textClause = $this->bakedTextClause($line1, $line2);
+
+        if (! empty($payload['scenes'][0]) && is_array($payload['scenes'][0])) {
+            $payload['scenes'][0]['on_screen'] = str_replace(' | ', "\n", $cover);
+            $img = trim((string) ($payload['scenes'][0]['image_prompt'] ?? ''));
+            if ($coverWasVague || $img === '' || ! $this->promptHasCoverLines($img, $line1, $line2)) {
+                if ($img !== '' && ! $coverWasVague) {
+                    // Prompt visual bagus — sisipkan teks 2 baris saja.
+                    $payload['scenes'][0]['image_prompt'] = rtrim($img, " \t\n\r\0\x0B.").'. '.$textClause.'.';
+                } else {
+                    $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo with yellow rubber duck';
+                    $style = $kit->visual_style ?: 'Cinematic high contrast urban night';
+                    $ratio = $format === self::FORMAT_FOTO ? ($kit->aspect_ratio ?: '4:5') : ($kit->aspect_ratio ?: '9:16');
+                    $payload['scenes'][0]['image_prompt'] = "A vertical {$ratio} cinematic social media frame. {$char}. {$style}. {$textClause}. High contrast, readable typography, film grain, no offensive elements.";
+                }
+            }
+            $payload['thumbnail_prompt'] = $payload['scenes'][0]['image_prompt'];
+        }
+
+        return $payload;
+    }
+
+    protected function ensureSolutionCaption(string $caption, string $coverTheme, string $topic, BrandKit $kit): string
+    {
+        $caption = trim($caption);
+        if ($caption !== '' && ! $this->captionMissingSolution($caption)) {
+            return $caption;
+        }
+
+        $copy = $this->punchyVisualCopy($this->spokenTheme($coverTheme, $topic), null, $kit);
+        if ($caption === '') {
+            return $copy['caption'];
+        }
+
+        // Caption ada tapi tanpa solusi — tempel blok solusi.
+        $hashtags = trim((string) ($kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral'));
+        $body = preg_replace('/\n?\.(\n\.)+\n?.*/s', '', $caption) ?? $caption;
+        $body = trim(preg_replace('/#\w+/u', '', $body) ?? $body);
+
+        return $body."\n\nSolusi:\n"
+            ."- Sadari polanya, jangan normalisasi rasa cemas/bersalah yang dipelihara orang lain.\n"
+            ."- Set batas jelas: kontak, topik, dan akses emosional yang merusakmu.\n"
+            ."- Kalau mereka menolak batasmu, itu bukti — bukan alasan untuk bertahan.\n\n"
+            ."Simpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags;
+    }
+
+    /**
+     * @return array{cover:string,lines:array{0:string,1:string},caption:string}
+     */
+    protected function punchyVisualCopy(string $theme, ?ContentIdea $idea, BrandKit $kit): array
+    {
+        $theme = $this->spokenTheme($theme, $theme);
+        $hashtags = trim((string) ($kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral'));
+        $t = Str::lower($theme);
+
+        if (preg_match('/cinta|toxic|beracun|hubungan|pacar|pasangan/u', $t)) {
+            $line1 = 'CINTA BERACUN BUKAN CINTA';
+            $line2 = 'JIKA TERUS CEMAS — PERGI';
+            $hook = 'Kalau setiap hari yang dirawat cuma luka dan rasa cemas, itu bukan cinta — itu kontrol.';
+            $insight = 'Cinta yang sehat tidak membuatmu takut kehilangan diri sendiri. Kalau kamu harus mengecil supaya mereka nyaman, polanya sudah salah.';
+            $steps = [
+                'Tulis batas non-negotiable-mu (kontak, nada bicara, gaslighting).',
+                'Komunikasikan sekali dengan tenang. Pantau apakah mereka hormati atau malah memutar kesalahan ke kamu.',
+                'Kalau batas ditolak, jarakkan. Melindungi diri bukan kejam — itu waras.',
+            ];
+        } elseif (preg_match('/bingkai|frame|pertanyaan jebakan|menyudutkan|manipulasi/u', $t)) {
+            $line1 = 'JANGAN JAWAB PERTANYAAN JEBAKAN';
+            $line2 = 'BALIKKAN BINGKAINYA DULU';
+            $hook = 'Pertanyaan tajam sering bukan minta jawaban — itu jebakan bingkai.';
+            $insight = 'Kalau kamu langsung membela diri, kamu sudah kalah di medan yang mereka pilih.';
+            $steps = [
+                'Tahan 2 detik. Jangan buru-buru menjelaskan.',
+                'Tanyakan balik asumsi di dalam pertanyaan mereka.',
+                'Buat aturan main baru: jawab hanya di bingkai yang adil.',
+            ];
+        } elseif (preg_match('/bersalah|guilt|gaslight/u', $t)) {
+            $line1 = 'MERASA BERSALAH TERUS?';
+            $line2 = 'ITU BUKAN SALAHMU — ITU KONTROL';
+            $hook = 'Rasa bersalah yang tiba-tiba sering bukan nurani — itu produk gaslighting.';
+            $insight = 'Orang yang mengontrol akan membuatmu merasa berhutang setiap kali kamu menjaga diri.';
+            $steps = [
+                'Tanya: “Apa faktanya, atau cuma perasaan yang mereka tanam?”',
+                'Jangan minta maaf untuk batas yang sehat.',
+                'Catat pola: kapan rasa bersalah muncul, siapa yang untung.',
+            ];
+        } else {
+            $short = Str::upper(Str::limit($theme, 28, ''));
+            $line1 = $short !== '' ? $short : 'INI BUKAN KEBIASAAN';
+            $line2 = 'INI JEBAKAN — PUTUS POLANYA';
+            $hook = $this->spokenLine($idea?->hook) ?: "{$theme} sering terasa biasa — padahal itu pola yang mengikis kendali.";
+            $insight = $this->spokenLine($idea?->angle) ?: 'Selama kamu hanya menyadari tanpa bertindak, polanya yang menang.';
+            $steps = [
+                'Namai polanya dengan satu kalimat jujur.',
+                'Pilih 1 batas kecil yang bisa kamu tegakkan hari ini.',
+                'Ulangi batas itu konsisten — jangan tawar lagi dengan rasa takut.',
+            ];
+        }
+
+        $cover = $line1.' | '.$line2;
+        $caption = $hook."\n\n".$insight."\n\nSolusi:\n"
+            .'- '.$steps[0]."\n"
+            .'- '.$steps[1]."\n"
+            .'- '.$steps[2]."\n\n"
+            ."Simpan. Share ke yang lagi kena pola yang sama. 👇\n.\n.\n.\n".$hashtags;
+
+        return [
+            'cover' => $cover,
+            'lines' => [$line1, $line2],
+            'caption' => $caption,
+        ];
+    }
+
+    /**
+     * @return array{0:string,1:string}
+     */
+    protected function splitCoverLines(string $cover): array
+    {
+        $cover = trim(str_replace(["\r\n", "\r"], "\n", $cover));
+        if (str_contains($cover, '|')) {
+            $parts = array_values(array_filter(array_map('trim', explode('|', $cover))));
+        } elseif (str_contains($cover, "\n")) {
+            $parts = array_values(array_filter(array_map('trim', explode("\n", $cover))));
+        } else {
+            $parts = [Str::upper($cover)];
+        }
+
+        $line1 = Str::upper($parts[0] ?? 'PESAN UTAMA');
+        $line2 = Str::upper($parts[1] ?? 'LAKUKAN BATAS SEKARANG');
+
+        return [$line1, $line2];
+    }
+
+    protected function bakedTextClause(string $line1, string $line2): string
+    {
+        return 'At the top of the image, the text "'.$line1.'" is boldly displayed on the first line and the text "'.$line2.'" directly below it on the second line, both in a large modern glowing yellow Anton-style font with a dark drop shadow, perfectly readable';
+    }
+
+    protected function promptHasCoverLines(string $prompt, string $line1, string $line2): bool
+    {
+        return str_contains($prompt, '"'.$line1.'"') && str_contains($prompt, '"'.$line2.'"');
+    }
+
+    protected function looksLikeVagueCover(string $cover): bool
+    {
+        $cover = trim($cover);
+        if ($cover === '') {
+            return true;
+        }
+
+        // Sudah 2 baris dengan aksi = OK.
+        if ((str_contains($cover, '|') || str_contains($cover, "\n"))
+            && preg_match('/\b(bukan|stop|jangan|putus|pergi|lepas|batas|balikkan|tolak|keluar|lakukan|sekarang|tinggalkan)\b/iu', $cover)
+        ) {
+            return false;
+        }
+
+        // Label tema tanpa perintah/solusi = abu-abu.
+        return ! (bool) preg_match('/\b(bukan|stop|jangan|putus|pergi|lepas|batas|cara|jika|maka|tinggalkan|lawan|tolak|keluar|balikkan|lakukan)\b/iu', $cover);
+    }
+
+    protected function captionMissingSolution(string $caption): bool
+    {
+        if (trim($caption) === '') {
+            return true;
+        }
+
+        return ! (bool) preg_match('/\b(solusi|langkah|lakukan|batas|putus|pergi|tinggalkan|tolak|ubah pola|set batas|jarakkan|balikkan)\b/iu', $caption);
+    }
+
     protected function ensureThumbnailHasTitle(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
     {
-        $cover = trim($coverTheme) !== '' ? Str::upper($coverTheme) : 'JUDUL COVER';
+        [$line1, $line2] = $this->splitCoverLines($coverTheme !== '' ? $coverTheme : 'JUDUL COVER');
         $prompt = trim($prompt);
-        $titleClause = 'At the top of the image, the text "'.$cover.'" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow';
+        $titleClause = $this->bakedTextClause($line1, $line2);
 
-        if ($prompt !== '' && (str_contains($prompt, '"'.$cover.'"') || preg_match('/the text\s+"'.preg_quote($cover, '/').'"/i', $prompt))) {
+        if ($prompt !== '' && $this->promptHasCoverLines($prompt, $line1, $line2)) {
             return $prompt;
+        }
+
+        // Single-line legacy cover still accepted if exact quote present.
+        $legacy = Str::upper(trim(str_replace('|', ' ', $coverTheme)));
+        if ($prompt !== '' && $legacy !== '' && str_contains($prompt, '"'.$legacy.'"')) {
+            return rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.';
         }
 
         if ($prompt !== '') {
