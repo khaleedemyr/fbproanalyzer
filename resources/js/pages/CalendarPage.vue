@@ -144,6 +144,11 @@ onMounted(load);
                                 @click="router.push({ name: 'blueprint-detail', params: { id: bp.id } })"
                             >
                                 <span class="text-[9px] uppercase text-teal-700">{{ formatLabel[bp.format] || 'VO' }}</span>
+                                ·
+                                <span
+                                    class="text-[9px] uppercase"
+                                    :class="bp.engine === 'gemini' ? 'text-violet-700' : 'text-amber-700'"
+                                >{{ bp.engine === 'gemini' ? 'AI' : 'Template' }}</span>
                                 · {{ bp.cover_theme || bp.title }}
                             </button>
                             <div class="mt-1 flex gap-1">

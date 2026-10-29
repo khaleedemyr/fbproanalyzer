@@ -137,9 +137,17 @@ onMounted(load);
                     <h3 class="font-semibold text-slate-900">{{ bp.cover_theme || bp.title }}</h3>
                     <span class="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase text-slate-700">{{ bp.status }}</span>
                 </div>
-                <p class="mt-2 text-[11px] font-semibold uppercase tracking-wide text-teal-700">
-                    {{ formatLabel[bp.format] || 'Reels VO' }}
-                </p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                    <span class="rounded bg-teal-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-teal-800">
+                        {{ formatLabel[bp.format] || 'Reels VO' }}
+                    </span>
+                    <span
+                        class="rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+                        :class="bp.engine === 'gemini' ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-900'"
+                    >
+                        {{ bp.engine === 'gemini' ? 'AI Gemini' : 'Template' }}
+                    </span>
+                </div>
                 <p class="mt-1 line-clamp-2 text-sm text-slate-600">{{ bp.story_concept }}</p>
                 <p class="mt-2 text-xs text-slate-500">
                     {{ bp.planned_date ? `Kalender: ${bp.planned_date}` : 'Belum dijadwalkan' }}

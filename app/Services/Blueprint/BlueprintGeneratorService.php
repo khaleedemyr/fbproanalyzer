@@ -41,20 +41,23 @@ class BlueprintGeneratorService
     ): ContentBlueprint {
         $kit = $brandKit ?? BrandKit::defaultFor($user);
         $topic = trim($topic) !== '' ? trim($topic) : 'Topik psikologi viral';
-        $title = $this->coverTitle($topic, $idea);
         $format = $this->normalizeFormat($format);
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
 
-        $gemini = $this->tryGemini($kit, $title, $topic, $idea, $format);
+        $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
+        $cleanTitle = $this->coverTitle($cleanTopic, $idea);
+        $radarContext = $this->radarContext($signal);
+
+        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $radarContext);
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
         } else {
             $payload = $format === self::FORMAT_REELS_PANJANG
-                ? $this->buildLongTemplate($kit, $title, $topic, $idea)
-                : $this->buildShortTemplate($kit, $title, $topic, $idea);
+                ? $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea)
+                : $this->buildShortTemplate($kit, $cleanTitle, $cleanTopic, $idea);
         }
 
         return ContentBlueprint::query()->create([
@@ -65,9 +68,10 @@ class BlueprintGeneratorService
             'title' => $payload['title'],
             'cover_theme' => $payload['cover_theme'],
             'story_concept' => $payload['story_concept'],
-            'source_topic' => $topic,
+            'source_topic' => $cleanTopic,
             'status' => $plannedDate ? 'scheduled' : 'ready',
             'format' => $format,
+            'engine' => $this->lastEngine,
             'scenes' => $payload['scenes'],
             'thumbnail_prompt' => $payload['thumbnail_prompt'],
             'caption' => $payload['caption'],
@@ -96,12 +100,10 @@ class BlueprintGeneratorService
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
     ): ContentBlueprint {
-        $topic = $signal->title ?: $signal->keyword;
-        if ($signal->snippet) {
-            $topic .= ' — '.Str::limit($signal->snippet, 120);
-        }
+        // Jangan append snippet radar (metrik Google/YouTube) ke topik — itu bocor ke naskah VO.
+        $topic = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
 
-        return $this->generateFromTopic($user, (string) $topic, null, null, $signal, $plannedDate, $format);
+        return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format);
     }
 
     public function toMarkdown(ContentBlueprint $bp, BrandKit $kit): string
@@ -180,8 +182,14 @@ class BlueprintGeneratorService
     /**
      * @return array{title:string,cover_theme:string,story_concept:string,scenes:array<int,array<string,mixed>>,thumbnail_prompt:string,caption:string,title_options?:array<int,string>}|null
      */
-    protected function tryGemini(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea, string $format): ?array
-    {
+    protected function tryGemini(
+        BrandKit $kit,
+        string $title,
+        string $topic,
+        ?ContentIdea $idea,
+        string $format,
+        string $radarContext = '',
+    ): ?array {
         $apiKey = trim((string) config('blueprint.gemini_api_key', ''));
         if ($apiKey === '') {
             $this->lastWarning = 'GEMINI_API_KEY belum terisi / belum kebaca config. Fallback template.';
@@ -191,8 +199,8 @@ class BlueprintGeneratorService
 
         $model = config('blueprint.gemini_model', 'gemini-2.0-flash');
         $prompt = $format === self::FORMAT_REELS_PANJANG
-            ? $this->geminiLongPrompt($kit, $title, $topic, $idea)
-            : $this->geminiShortPrompt($kit, $title, $topic, $idea);
+            ? $this->geminiLongPrompt($kit, $title, $topic, $idea, $radarContext)
+            : $this->geminiShortPrompt($kit, $title, $topic, $idea, $radarContext);
 
         try {
             $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 120 : 60)
@@ -257,10 +265,16 @@ class BlueprintGeneratorService
         }
     }
 
-    protected function geminiShortPrompt(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): string
-    {
+    protected function geminiShortPrompt(
+        BrandKit $kit,
+        string $title,
+        string $topic,
+        ?ContentIdea $idea,
+        string $radarContext = '',
+    ): string {
         $hook = $idea?->hook ?: '';
         $angle = $idea?->angle ?: '';
+        $radarBlock = $radarContext !== '' ? "Konteks riset (JANGAN dibaca di VO, hanya inspirasi sudut):\n{$radarContext}\n" : '';
 
         return <<<PROMPT
 Kamu adalah penulis blueprint Reels VO cinematic pendek (~15 detik) untuk brand "{$kit->name}" niche {$kit->niche}.
@@ -273,10 +287,16 @@ Karakter WAJIB konsisten di SEMUA prompt gambar/animasi:
 - Sudut VO: "{$kit->voice_perspective}" (bahasa Indonesia santai, tajam, psikologi gelap)
 - Hashtag: {$kit->caption_hashtags}
 
-Tema: {$title}
-Topik: {$topic}
+Tema bersih: {$title}
+Topik bersih: {$topic}
 Hook: {$hook}
 Angle: {$angle}
+{$radarBlock}
+ATURAN KERAS NASKAH VO:
+- VO harus terdengar seperti dibacakan manusia di Reels.
+- DILARANG memasukkan angka skor, "Google minat", "YouTube ·", "pantauan otomatis", URL, metric, atau metadata radar.
+- DILARANG copy-paste judul mentah yang berisi tanda "—" + data riset.
+- Fokus insight psikologi + hook emosional.
 
 JSON SAJA:
 {
@@ -302,21 +322,29 @@ Tepat 3 scene: 00:00-00:05, 00:05-00:10, 00:10-00:15.
 PROMPT;
     }
 
-    protected function geminiLongPrompt(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): string
-    {
+    protected function geminiLongPrompt(
+        BrandKit $kit,
+        string $title,
+        string $topic,
+        ?ContentIdea $idea,
+        string $radarContext = '',
+    ): string {
         $hook = $idea?->hook ?: '';
         $angle = $idea?->angle ?: '';
+        $radarBlock = $radarContext !== '' ? "Konteks riset (JANGAN dibaca di VO):\n{$radarContext}\n" : '';
 
         return <<<PROMPT
 Kamu adalah penulis MASTER BLUEPRINT Reels Panjang / VOD Dark Psychology (~8-10 menit) untuk brand "{$kit->name}".
 Gaya: cinematic dark psychology (bukan stickman). Campur visual_type: "ai", "stock", "black", "bumper".
 Beat tiap ~5 detik. Bahasa Indonesia tajam untuk VO & teks layar. Prompt visual/motion dalam English.
 
-Tema: {$title}
-Topik: {$topic}
+Tema bersih: {$title}
+Topik bersih: {$topic}
 Hook: {$hook}
 Angle: {$angle}
 Hashtag: {$kit->caption_hashtags}
+{$radarBlock}
+ATURAN KERAS: VO & teks layar DILARANG berisi metrik Google/YouTube, skor, URL, atau metadata radar.
 
 Struktur WAJIB:
 1) THE GOLDEN HOOK (00:00-02:00) — cerita kasus/tokoh + cliff ke topik
@@ -359,7 +387,8 @@ PROMPT;
      */
     protected function buildShortTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
     {
-        $cover = Str::upper(Str::limit(preg_replace('/\s+/', ' ', $title) ?: 'TEMA VIRAL', 60, ''));
+        $theme = $this->spokenTheme($title, $topic);
+        $cover = Str::upper(Str::limit($theme ?: 'TEMA VIRAL', 60, ''));
         $short = Str::limit($idea?->hook ?: $cover, 42, '');
         $char = $kit->character_visual ?: 'A stickman figure made of thin black wireframe lines in a sharp executive tuxedo with a yellow rubber duck prop';
         $style = $kit->visual_style ?: 'Cinematic 9:16 vertical, Jakarta neon night, high contrast';
@@ -368,8 +397,8 @@ PROMPT;
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #psikologigelap #reelsviral';
 
         $vos = [
-            $idea?->hook ?: "{$voice} bilang begini: yang kelihatan tenang di luar, sering paling berantakan di dalam.",
-            $idea?->angle ?: "Orang jarang sadar: {$topic} itu bukan soal orang lain — itu soal cara otakmu mencari kontrol.",
+            $this->spokenLine($idea?->hook) ?: "{$voice} bilang begini: yang kelihatan tenang di luar, sering paling berantakan di dalam.",
+            $this->spokenLine($idea?->angle) ?: "Orang jarang sadar: {$theme} itu bukan soal orang lain — itu soal cara otakmu mencari kontrol.",
             'Kalau ini nyampe, berhenti pura-pura oke. Ubah pola sebelum pola itu yang ngubah hidupmu.',
         ];
         $locations = [
@@ -404,12 +433,12 @@ PROMPT;
         }
 
         return [
-            'title' => Str::limit($title, 120, ''),
+            'title' => Str::limit($theme, 120, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Karakter {$kit->character_name} berjas rapi berjalan di keramaian kota malam, membongkar sudut gelap dari: {$topic}.",
+            'story_concept' => "Karakter {$kit->character_name} berjas rapi berjalan di keramaian kota malam, membongkar sudut gelap dari: {$theme}.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical {$kit->aspect_ratio} cinematic graphic design for a video thumbnail. {$char} in a bustling neon-lit Jakarta street at night. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. High contrast, urban cinematic aesthetic, professional film grain, no offensive elements.",
-            'caption' => trim($vos[0])."\n\nRealitanya, {$topic} sering jadi jebakan yang terasa biasa — sampai kamu sadar biayanya terlalu mahal.\n\nSetuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n".$hashtags,
+            'caption' => trim($vos[0])."\n\nRealitanya, {$theme} sering jadi jebakan yang terasa biasa — sampai kamu sadar biayanya terlalu mahal.\n\nSetuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n".$hashtags,
             'title_options' => [],
         ];
     }
@@ -421,10 +450,11 @@ PROMPT;
      */
     protected function buildLongTemplate(BrandKit $kit, string $title, string $topic, ?ContentIdea $idea): array
     {
-        $cover = Str::upper(Str::limit(preg_replace('/\s+/', ' ', $title) ?: 'EPISODE DARK PSYCHOLOGY', 70, ''));
-        $shortTopic = Str::limit($topic, 80, '');
+        $theme = $this->spokenTheme($title, $topic);
+        $cover = Str::upper(Str::limit($theme ?: 'EPISODE DARK PSYCHOLOGY', 70, ''));
+        $shortTopic = Str::limit($theme, 80, '');
         $hashtags = $kit->caption_hashtags ?: '#keaabbasy #darkpsychology #psikologigelap #manipulasi #reelsfb';
-        $hookLine = $idea?->hook ?: "Orang jarang sadar: {$shortTopic} adalah penjara kata yang dibangun diam-diam.";
+        $hookLine = $this->spokenLine($idea?->hook) ?: "Orang jarang sadar: {$shortTopic} adalah penjara kata yang dibangun diam-diam.";
 
         $beats = [
             // GOLDEN HOOK
@@ -520,10 +550,10 @@ PROMPT;
     protected function coverTitle(string $topic, ?ContentIdea $idea): string
     {
         if ($idea?->title) {
-            return $idea->title;
+            return $this->spokenTheme($idea->title, $idea->title);
         }
 
-        return Str::of($topic)->before('—')->trim()->limit(80, '')->toString() ?: 'Ide Viral Psikologi';
+        return $this->spokenTheme($topic, $topic) ?: 'Ide Viral Psikologi';
     }
 
     protected function normalizeFormat(string $format): string
@@ -531,5 +561,70 @@ PROMPT;
         return in_array($format, [self::FORMAT_REELS_VO, self::FORMAT_REELS_PANJANG], true)
             ? $format
             : self::FORMAT_REELS_VO;
+    }
+
+    protected function cleanTopic(string $topic, ?ContentIdea $idea, ?TrendSignal $signal): string
+    {
+        if ($signal) {
+            return $this->spokenTheme(
+                (string) ($signal->keyword ?: $signal->title ?: $topic),
+                (string) ($signal->keyword ?: $topic)
+            );
+        }
+
+        if ($idea?->title) {
+            return $this->spokenTheme($idea->title, $topic);
+        }
+
+        return $this->spokenTheme($topic, $topic);
+    }
+
+    protected function radarContext(?TrendSignal $signal): string
+    {
+        if (! $signal) {
+            return '';
+        }
+
+        $parts = array_filter([
+            'sumber: '.$signal->source,
+            $signal->keyword ? 'keyword: '.$signal->keyword : null,
+            $signal->metric_value ? 'skor_radar: '.$signal->metric_value : null,
+            $signal->snippet ? 'catatan: '.Str::limit($signal->snippet, 160) : null,
+        ]);
+
+        return implode(' | ', $parts);
+    }
+
+    protected function spokenTheme(string $title, string $fallback): string
+    {
+        $text = trim($title) !== '' ? $title : $fallback;
+        $text = preg_replace('/\s+/', ' ', $text) ?? $text;
+
+        // Buang metadata radar yang sering nempel setelah em dash / bullet.
+        $text = preg_replace('/\s+[—\-]\s*(Google|YouTube|pantauan|minat relatif|metric|skor).*$/iu', '', $text) ?? $text;
+        $text = preg_replace('/\b(Google minat relatif|pantauan otomatis|YouTube\s*·).*$/iu', '', $text) ?? $text;
+        $text = preg_replace('/\d+\s*\/\s*100/', '', $text) ?? $text;
+        $text = trim($text, " \t\n\r\0\x0B—-·|");
+
+        return Str::limit($text !== '' ? $text : 'psikologi', 80, '');
+    }
+
+    protected function spokenLine(?string $line): ?string
+    {
+        if ($line === null || trim($line) === '') {
+            return null;
+        }
+
+        $clean = $this->spokenTheme($line, $line);
+        if ($this->looksLikeRadarNoise($clean) || $this->looksLikeRadarNoise($line)) {
+            return null;
+        }
+
+        return $clean;
+    }
+
+    protected function looksLikeRadarNoise(string $text): bool
+    {
+        return (bool) preg_match('/google minat|pantauan otomatis|minat relatif|youtube\s*·|\/\s*100|metric_value|viral_score/i', $text);
     }
 }

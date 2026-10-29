@@ -18,6 +18,7 @@ class ContentBlueprint extends Model
         'source_topic',
         'status',
         'format',
+        'engine',
         'scenes',
         'thumbnail_prompt',
         'caption',

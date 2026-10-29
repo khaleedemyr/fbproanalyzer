@@ -16,6 +16,8 @@ const plannedDate = ref('');
 const scenes = computed(() => bp.value?.scenes || []);
 const isLong = computed(() => bp.value?.format === 'reels_panjang');
 const formatLabel = computed(() => (isLong.value ? 'Reels Panjang / VOD' : 'Reels VO'));
+const isAi = computed(() => bp.value?.engine === 'gemini');
+const engineLabel = computed(() => (isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint'));
 
 const groupedScenes = computed(() => {
     const groups = [];
@@ -100,7 +102,15 @@ onMounted(load);
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
                 <button type="button" class="text-sm text-teal-700 hover:underline" @click="router.push({ name: 'blueprints' })">← Semua blueprint</button>
-                <p v-if="bp" class="mt-2 text-[11px] font-semibold uppercase tracking-wide text-teal-700">{{ formatLabel }}</p>
+                <div v-if="bp" class="mt-2 flex flex-wrap items-center gap-2">
+                    <span class="rounded bg-teal-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-teal-800">{{ formatLabel }}</span>
+                    <span
+                        class="rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+                        :class="isAi ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-900'"
+                    >
+                        {{ engineLabel }}
+                    </span>
+                </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
             </div>
