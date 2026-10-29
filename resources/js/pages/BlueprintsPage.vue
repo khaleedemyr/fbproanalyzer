@@ -45,11 +45,15 @@ async function generate() {
             planned_date: plannedDate.value || null,
             format: format.value,
         });
-        message.value = data.message;
+        message.value = data.duplicate
+            ? `${data.message} Judul: "${data.data?.cover_theme || data.data?.title}".`
+            : data.message;
         if (data.warning) {
             error.value = data.warning;
         }
-        topic.value = '';
+        if (!data.duplicate) {
+            topic.value = '';
+        }
         await load();
         if (data.data?.id) {
             router.push({ name: 'blueprint-detail', params: { id: data.data.id } });

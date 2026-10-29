@@ -63,41 +63,50 @@ class BlueprintController extends Controller
             'trend_signal_id' => ['nullable', 'exists:trend_signals,id'],
             'planned_date' => ['nullable', 'date'],
             'format' => ['nullable', 'in:reels_vo,reels_panjang'],
+            'force' => ['sometimes', 'boolean'],
         ]);
 
         $user = $request->user();
         $planned = $data['planned_date'] ?? null;
         $format = $data['format'] ?? BlueprintGeneratorService::FORMAT_REELS_VO;
+        $force = (bool) ($data['force'] ?? false);
 
         if (! empty($data['content_idea_id'])) {
             $idea = ContentIdea::query()->findOrFail($data['content_idea_id']);
             abort_unless($idea->user_id === $user->id, 403);
-            $bp = $generator->generateFromIdea($user, $idea, $planned, $format);
+            $bp = $generator->generateFromIdea($user, $idea, $planned, $format, $force);
         } elseif (! empty($data['trend_signal_id'])) {
             $signal = TrendSignal::query()->findOrFail($data['trend_signal_id']);
-            $bp = $generator->generateFromSignal($user, $signal, $planned, $format);
+            $bp = $generator->generateFromSignal($user, $signal, $planned, $format, $force);
         } else {
             abort_unless(filled($data['topic'] ?? null), 422, 'topic, content_idea_id, atau trend_signal_id wajib.');
-            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format);
+            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format, $force);
         }
 
         $bp->load('brandKit');
 
+        $duplicate = $generator->wasDuplicate();
         $engine = $generator->lastEngine();
         $warning = $generator->lastWarning();
-        $label = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
-            ? 'Blueprint Reels Panjang siap.'
-            : 'Blueprint Reels VO siap.';
-        $label .= $engine === 'gemini' ? ' (AI Gemini)' : ' (template)';
+
+        if ($duplicate) {
+            $label = 'Judul blueprint sudah ada — dibuka yang lama (tema bebas, judul tidak diduplikasi).';
+        } else {
+            $label = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
+                ? 'Blueprint Reels Panjang siap.'
+                : 'Blueprint Reels VO siap.';
+            $label .= $engine === 'gemini' ? ' (AI Gemini)' : ' (template)';
+        }
 
         return response()->json([
             'message' => $label,
             'data' => $bp,
             'markdown' => $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($user)),
             'engine' => $engine,
+            'duplicate' => $duplicate,
             'gemini_configured' => filled(config('blueprint.gemini_api_key')),
             'warning' => $warning,
-        ], 201);
+        ], $duplicate ? 200 : 201);
     }
 
     public function update(Request $request, ContentBlueprint $blueprint): JsonResponse

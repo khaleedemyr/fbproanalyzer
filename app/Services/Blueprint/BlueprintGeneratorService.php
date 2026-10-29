@@ -20,6 +20,8 @@ class BlueprintGeneratorService
 
     protected ?string $lastWarning = null;
 
+    protected bool $wasDuplicate = false;
+
     public function lastEngine(): string
     {
         return $this->lastEngine;
@@ -30,6 +32,11 @@ class BlueprintGeneratorService
         return $this->lastWarning;
     }
 
+    public function wasDuplicate(): bool
+    {
+        return $this->wasDuplicate;
+    }
+
     public function generateFromTopic(
         User $user,
         string $topic,
@@ -38,6 +45,7 @@ class BlueprintGeneratorService
         ?TrendSignal $signal = null,
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
+        bool $force = false,
     ): ContentBlueprint {
         $kit = $brandKit ?? BrandKit::defaultFor($user);
         $topic = trim($topic) !== '' ? trim($topic) : 'Topik psikologi viral';
@@ -45,10 +53,22 @@ class BlueprintGeneratorService
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
+        $this->wasDuplicate = false;
 
         $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
         $cleanTitle = $this->coverTitle($cleanTopic, $idea);
         $radarContext = $this->radarContext($signal);
+
+        // Judul yang sama (per format) tidak digenerate ulang — tema/topik tetap bebas.
+        if (! $force) {
+            $existing = $this->findExistingByTitle($user, $cleanTitle, $format);
+            if ($existing) {
+                $this->wasDuplicate = true;
+                $this->lastEngine = (string) ($existing->engine ?: 'template');
+
+                return $existing;
+            }
+        }
 
         $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $radarContext);
         if ($gemini !== null) {
@@ -59,6 +79,14 @@ class BlueprintGeneratorService
                 ? $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea)
                 : $this->buildShortTemplate($kit, $cleanTitle, $cleanTopic, $idea);
         }
+
+        $payload['cover_theme'] = Str::upper(trim((string) ($payload['cover_theme'] ?: $cleanTitle)));
+        $payload['thumbnail_prompt'] = $this->ensureThumbnailHasTitle(
+            (string) ($payload['thumbnail_prompt'] ?? ''),
+            (string) $payload['cover_theme'],
+            $kit,
+            $format
+        );
 
         return ContentBlueprint::query()->create([
             'user_id' => $user->id,
@@ -85,13 +113,14 @@ class BlueprintGeneratorService
         ContentIdea $idea,
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
+        bool $force = false,
     ): ContentBlueprint {
         $topic = $idea->title;
         if ($idea->hook) {
             $topic .= ' — '.$idea->hook;
         }
 
-        return $this->generateFromTopic($user, $topic, null, $idea, null, $plannedDate, $format);
+        return $this->generateFromTopic($user, $topic, null, $idea, null, $plannedDate, $format, $force);
     }
 
     public function generateFromSignal(
@@ -99,11 +128,47 @@ class BlueprintGeneratorService
         TrendSignal $signal,
         ?string $plannedDate = null,
         string $format = self::FORMAT_REELS_VO,
+        bool $force = false,
     ): ContentBlueprint {
         // Jangan append snippet radar (metrik Google/YouTube) ke topik — itu bocor ke naskah VO.
         $topic = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
 
-        return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format);
+        return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format, $force);
+    }
+
+    public function findExistingByTitle(User $user, string $title, string $format): ?ContentBlueprint
+    {
+        $key = $this->titleKey($title);
+        if ($key === '') {
+            return null;
+        }
+
+        $candidates = ContentBlueprint::query()
+            ->where('user_id', $user->id)
+            ->where('format', $this->normalizeFormat($format))
+            ->orderByDesc('id')
+            ->limit(300)
+            ->get();
+
+        foreach ($candidates as $bp) {
+            if ($this->titleKey((string) ($bp->cover_theme ?: $bp->title)) === $key) {
+                return $bp;
+            }
+            if ($this->titleKey((string) $bp->title) === $key) {
+                return $bp;
+            }
+        }
+
+        return null;
+    }
+
+    public function titleKey(string $value): string
+    {
+        $clean = $this->spokenTheme($value, $value);
+        $clean = Str::lower($clean);
+        $clean = preg_replace('/[^a-z0-9]+/u', '', $clean) ?? '';
+
+        return $clean;
     }
 
     public function toMarkdown(ContentBlueprint $bp, BrandKit $kit): string
@@ -314,10 +379,15 @@ ATURAN KERAS NASKAH VO:
 - DILARANG copy-paste judul mentah yang berisi tanda "—" + data riset.
 - Fokus insight psikologi + hook emosional.
 
+ATURAN KERAS THUMBNAIL:
+- thumbnail_prompt WAJIB menyertakan teks judul persis di dalam tanda kutip, contoh: the text "TOXIC RELATIONSHIP" is boldly displayed...
+- Jangan cuma bilang "title overlay aesthetic" tanpa menulis judulnya.
+- Font besar modern glowing yellow + dark drop shadow di atas gambar.
+
 JSON SAJA:
 {
   "title": "...",
-  "cover_theme": "JUDUL COVER",
+  "cover_theme": "JUDUL COVER HURUF BESAR",
   "story_concept": "...",
   "scenes": [
     {
@@ -330,7 +400,7 @@ JSON SAJA:
       "motion_prompt": "English I2V motion"
     }
   ],
-  "thumbnail_prompt": "...",
+  "thumbnail_prompt": "A vertical 9:16 cinematic graphic design for a video thumbnail. ... At the top of the image, the text \\"JUDUL COVER HURUF BESAR\\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. ...",
   "caption": "...",
   "title_options": []
 }
@@ -361,6 +431,7 @@ Angle: {$angle}
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
 ATURAN KERAS: VO & teks layar DILARANG berisi metrik Google/YouTube, skor, URL, atau metadata radar.
+ATURAN THUMBNAIL: thumbnail_prompt WAJIB menulis teks judul exact di quotes, contoh: the text "JUDUL COVER" is boldly displayed in large glowing yellow font. Jangan hanya "title overlay aesthetic".
 
 Struktur WAJIB:
 1) THE GOLDEN HOOK (00:00-02:00) — cerita kasus/tokoh + cliff ke topik
@@ -385,7 +456,7 @@ JSON SAJA:
       "on_screen": "TEKS LAYAR SINGKAT"
     }
   ],
-  "thumbnail_prompt": "English thumbnail clickbait prompt",
+  "thumbnail_prompt": "A vertical 9:16 cinematic thumbnail... At the top, the text \\"JUDUL COVER\\" is boldly displayed in large glowing yellow font with dark drop shadow...",
   "caption": "caption panjang ID + CTA + hashtags",
   "title_options": [
     "Opsi fokusik...",
@@ -654,5 +725,31 @@ PROMPT;
     protected function looksLikeMetaInstruction(string $text): bool
     {
         return (bool) preg_match('/radar otomatis|buat sudut|tulis ulang|jangan copy|jangan dibaca|relatable \+ insight|auto radar|seed\)|sudut personal kea/i', $text);
+    }
+
+    protected function ensureThumbnailHasTitle(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
+    {
+        $cover = trim($coverTheme) !== '' ? Str::upper($coverTheme) : 'JUDUL COVER';
+        $prompt = trim($prompt);
+        $titleClause = 'At the top of the image, the text "'.$cover.'" is boldly displayed in a large, modern, glowing yellow Anton-style font with a dark drop shadow';
+
+        if ($prompt !== '' && (str_contains($prompt, '"'.$cover.'"') || preg_match('/the text\s+"'.preg_quote($cover, '/').'"/i', $prompt))) {
+            return $prompt;
+        }
+
+        if ($prompt !== '') {
+            // Buang frasa generik tanpa judul, lalu sisipkan judul exact.
+            $prompt = preg_replace('/,?\s*(bold\s+)?(moody\s+)?(anton\s+)?title overlay aesthetic\.?/i', '', $prompt) ?? $prompt;
+
+            return rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.';
+        }
+
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            return 'A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. '.$titleClause.'. Professional film grain, high contrast, no offensive elements.';
+        }
+
+        $char = $kit->character_visual ?: 'stickman wireframe executive in tuxedo holding a yellow rubber duck';
+
+        return 'A vertical '.($kit->aspect_ratio ?: '9:16').' cinematic graphic design for a video thumbnail. '.$char.' in a bustling neon-lit Jakarta street at night. '.$titleClause.'. High contrast, urban cinematic aesthetic, professional film grain, no offensive elements.';
     }
 }
