@@ -4,69 +4,95 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ContentIdea;
-use App\Models\ContentPost;
 use App\Models\WatchlistPost;
+use App\Services\ViralScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    public function __construct(private ViralScoreService $scorer)
+    {
+    }
+
     public function summary(Request $request): JsonResponse
     {
         $user = $request->user();
-        $days = (int) $request->integer('days', 30);
-        $since = now()->subDays(max(7, min(90, $days)));
 
-        $posts = ContentPost::query()
+        $viralPosts = WatchlistPost::query()
             ->where('user_id', $user->id)
-            ->where(function ($q) use ($since) {
-                $q->where('published_at', '>=', $since)
-                    ->orWhereNull('published_at');
-            })
-            ->orderByDesc('viral_score')
+            ->with('account:id,name,niche')
+            ->orderByDesc('estimated_score')
             ->limit(10)
-            ->with('metaAccount:id,name,type,niche')
             ->get();
 
-        $formatStats = ContentPost::query()
+        $formatStats = WatchlistPost::query()
             ->where('user_id', $user->id)
-            ->selectRaw('format, COUNT(*) as total, AVG(viral_score) as avg_score, AVG(engagement_rate) as avg_engagement')
+            ->selectRaw('format, COUNT(*) as total, AVG(estimated_score) as avg_score')
             ->groupBy('format')
             ->orderByDesc('avg_score')
             ->get();
 
-        $topicStats = ContentPost::query()
-            ->where('user_id', $user->id)
-            ->whereNotNull('topic_cluster')
-            ->selectRaw('topic_cluster, COUNT(*) as total, AVG(viral_score) as avg_score')
-            ->groupBy('topic_cluster')
+        $topicBuckets = [];
+        foreach ($viralPosts as $post) {
+            $cluster = $this->scorer->detectTopicCluster(($post->title ?? '').' '.($post->caption ?? '').' '.($post->hook_note ?? ''))
+                ?: 'umum';
+            if (! isset($topicBuckets[$cluster])) {
+                $topicBuckets[$cluster] = ['topic_cluster' => $cluster, 'total' => 0, 'avg_score' => 0.0, 'sum' => 0.0];
+            }
+            $topicBuckets[$cluster]['total']++;
+            $topicBuckets[$cluster]['sum'] += (float) $post->estimated_score;
+        }
+        $topicStats = collect($topicBuckets)
+            ->map(function (array $row) {
+                $row['avg_score'] = $row['total'] > 0 ? round($row['sum'] / $row['total'], 2) : 0;
+                unset($row['sum']);
+
+                return $row;
+            })
+            ->sortByDesc('avg_score')
+            ->values();
+
+        $topCreators = WatchlistPost::query()
+            ->where('watchlist_posts.user_id', $user->id)
+            ->join('watchlist_accounts', 'watchlist_accounts.id', '=', 'watchlist_posts.watchlist_account_id')
+            ->select([
+                'watchlist_accounts.id',
+                'watchlist_accounts.name',
+                DB::raw('COUNT(watchlist_posts.id) as posts_count'),
+                DB::raw('AVG(watchlist_posts.estimated_score) as avg_score'),
+                DB::raw('MAX(watchlist_posts.estimated_score) as max_score'),
+            ])
+            ->groupBy('watchlist_accounts.id', 'watchlist_accounts.name')
             ->orderByDesc('avg_score')
             ->limit(8)
             ->get();
 
         return response()->json([
+            'focus' => 'viral_niche_radar',
+            'niche' => 'psikologi',
             'stats' => [
-                'accounts' => $user->metaAccounts()->count(),
-                'posts' => $user->contentPosts()->count(),
-                'watchlist' => $user->watchlistAccounts()->count(),
+                'creators' => $user->watchlistAccounts()->count(),
+                'viral_posts' => WatchlistPost::query()->where('user_id', $user->id)->count(),
                 'ideas' => $user->contentIdeas()->where('status', 'queued')->count(),
-                'avg_viral_score' => round((float) $user->contentPosts()->avg('viral_score'), 2),
+                'avg_viral_score' => round((float) WatchlistPost::query()->where('user_id', $user->id)->avg('estimated_score'), 2),
             ],
-            'top_posts' => $posts,
+            'viral_board' => $viralPosts,
             'format_stats' => $formatStats,
             'topic_stats' => $topicStats,
-            'recent_watchlist' => WatchlistPost::query()
-                ->where('user_id', $user->id)
-                ->with('account:id,name')
-                ->orderByDesc('estimated_score')
-                ->limit(5)
-                ->get(),
+            'top_creators' => $topCreators,
             'idea_queue' => ContentIdea::query()
                 ->where('user_id', $user->id)
                 ->where('status', 'queued')
                 ->orderByDesc('potential_score')
-                ->limit(5)
+                ->limit(6)
                 ->get(),
+            'next_actions' => [
+                'Tambah 10–15 creator psikologi ke Watchlist',
+                'Setiap hari catat 3–5 post yang lagi panas (like/komen/share)',
+                'Generate ide dari pola viral sebelum produksi',
+            ],
         ]);
     }
 }

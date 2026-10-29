@@ -31,8 +31,8 @@ async function submit() {
     <div class="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_#ccfbf1,_#f8fafc_50%)] px-4">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
             <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">KEA Abbasy</p>
-            <h1 class="mt-2 text-2xl font-semibold text-slate-900">Masuk Analyzer</h1>
-            <p class="mt-1 text-sm text-slate-500">Analisa konten sebelum produksi.</p>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">Masuk Viral Radar</h1>
+            <p class="mt-1 text-sm text-slate-500">Cek konten psikologi yang sedang panas sebelum produksi.</p>
 
             <form class="mt-6 space-y-4" @submit.prevent="submit">
                 <label class="block text-sm">

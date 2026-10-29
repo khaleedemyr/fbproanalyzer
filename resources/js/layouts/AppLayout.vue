@@ -6,11 +6,11 @@ const auth = useAuthStore();
 const router = useRouter();
 
 const links = [
-    { to: '/', label: 'Dashboard', name: 'dashboard' },
-    { to: '/posts', label: 'Performa', name: 'posts' },
-    { to: '/accounts', label: 'Akun Meta', name: 'accounts' },
+    { to: '/', label: 'Viral Radar', name: 'dashboard' },
     { to: '/watchlist', label: 'Watchlist', name: 'watchlist' },
+    { to: '/posts', label: 'Papan Viral', name: 'posts' },
     { to: '/ideas', label: 'Ide Konten', name: 'ideas' },
+    { to: '/accounts', label: 'Akun Meta', name: 'accounts' },
 ];
 
 async function logout() {
@@ -24,8 +24,8 @@ async function logout() {
         <header class="border-b border-slate-200/80 bg-white/80 backdrop-blur">
             <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
                 <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">KEA Abbasy</p>
-                    <h1 class="text-lg font-semibold text-slate-900">FB Pro Analyzer</h1>
+                    <p class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-700">KEA Abbasy · Psikologi</p>
+                    <h1 class="text-lg font-semibold text-slate-900">Viral Niche Radar</h1>
                 </div>
                 <div class="flex items-center gap-3">
                     <div class="hidden text-right sm:block">
@@ -33,6 +33,7 @@ async function logout() {
                         <p class="text-xs text-slate-500">{{ auth.user?.email }}</p>
                     </div>
                     <button
+                        type="button"
                         class="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                         @click="logout"
                     >

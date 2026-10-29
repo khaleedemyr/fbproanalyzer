@@ -69,7 +69,7 @@ onMounted(load);
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h2 class="text-2xl font-semibold text-slate-900">Ide konten</h2>
-                <p class="mt-1 text-sm text-slate-500">Pre-check sebelum produksi — prioritaskan skor tinggi.</p>
+                <p class="mt-1 text-sm text-slate-500">Dari pola viral niche — pilih yang skornya tinggi sebelum produksi.</p>
             </div>
             <button
                 class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-60"

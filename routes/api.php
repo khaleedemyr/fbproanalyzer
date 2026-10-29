@@ -30,9 +30,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('watchlist/accounts', [WatchlistController::class, 'accounts']);
     Route::post('watchlist/accounts', [WatchlistController::class, 'storeAccount']);
+    Route::post('watchlist/seed-psychology', [WatchlistController::class, 'seedPsychology']);
     Route::delete('watchlist/accounts/{watchlistAccount}', [WatchlistController::class, 'destroyAccount']);
     Route::get('watchlist/posts', [WatchlistController::class, 'posts']);
     Route::post('watchlist/posts', [WatchlistController::class, 'storePost']);
+    Route::delete('watchlist/posts/{watchlistPost}', [WatchlistController::class, 'destroyPost']);
 
     Route::get('ideas', [ContentIdeaController::class, 'index']);
     Route::post('ideas', [ContentIdeaController::class, 'store']);

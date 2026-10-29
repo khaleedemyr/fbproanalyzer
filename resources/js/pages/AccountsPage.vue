@@ -32,18 +32,14 @@ async function connectMeta() {
     try {
         await ensureCsrf();
         const { data } = await http.get('/meta/redirect');
-
         if (!data?.url) {
-            throw new Error('URL OAuth Meta kosong. Cek META_APP_ID di .env');
+            throw new Error('URL OAuth Meta kosong.');
         }
-
         window.location.assign(data.url);
     } catch (e) {
         connecting.value = false;
         message.value = '';
-        error.value = e.response?.data?.message
-            || e.message
-            || 'Gagal menghubungkan Meta. Cek App ID/Secret dan redirect URI.';
+        error.value = e.response?.data?.message || e.message || 'Gagal menghubungkan Meta.';
     }
 }
 
@@ -74,7 +70,7 @@ async function setNiche(account, niche) {
 
 onMounted(async () => {
     if (route.query.meta === 'connected') {
-        message.value = 'Meta berhasil terhubung. Pilih Page lalu Sync.';
+        message.value = 'Meta terhubung. Fitur inti tetap di Watchlist/Viral Radar.';
     } else if (route.query.meta) {
         error.value = `Status Meta: ${route.query.meta}`;
     }
@@ -86,18 +82,25 @@ onMounted(async () => {
     <div class="space-y-6">
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
-                <h2 class="text-2xl font-semibold text-slate-900">Akun Meta</h2>
-                <p class="mt-1 text-sm text-slate-500">Hubungkan Personal Pro (Kea Abbasy) + Page, lalu sync Insights.</p>
+                <h2 class="text-2xl font-semibold text-slate-900">Akun Meta (opsional)</h2>
+                <p class="mt-1 text-sm text-slate-500">
+                    Bukan inti. Inti analisa viral niche ada di Watchlist. Ini hanya jika punya Page yang mau di-sync.
+                </p>
             </div>
             <button
                 type="button"
-                class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-wait disabled:opacity-70"
+                class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-70"
                 :disabled="connecting"
                 @click="connectMeta"
             >
                 {{ connecting ? 'Menghubungkan...' : 'Hubungkan Meta' }}
             </button>
         </div>
+
+        <p class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            Personal Pro (Kea Abbasy) tidak bisa di-sync Insights otomatis oleh Meta.
+            Untuk konten viral niche psikologi, pakai <strong>Watchlist</strong>.
+        </p>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>
         <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
@@ -107,12 +110,7 @@ onMounted(async () => {
         <div v-else class="grid gap-4 md:grid-cols-2">
             <article v-for="account in accounts" :key="account.id" class="rounded-xl border border-slate-200 bg-white p-5">
                 <div class="flex items-start gap-3">
-                    <img
-                        v-if="account.picture_url"
-                        :src="account.picture_url"
-                        alt=""
-                        class="h-12 w-12 rounded-full object-cover"
-                    />
+                    <img v-if="account.picture_url" :src="account.picture_url" alt="" class="h-12 w-12 rounded-full object-cover" />
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
                             <h3 class="truncate font-semibold text-slate-900">{{ account.name }}</h3>
@@ -123,37 +121,28 @@ onMounted(async () => {
                 </div>
 
                 <div class="mt-4 flex flex-wrap gap-2">
-                    <select
-                        class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                        :value="account.niche"
-                        @change="setNiche(account, $event.target.value)"
-                    >
+                    <select class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm" :value="account.niche" @change="setNiche(account, $event.target.value)">
                         <option value="psikologi">psikologi</option>
                         <option value="bisnis">bisnis</option>
                         <option value="fnb">fnb</option>
                         <option value="lainnya">lainnya</option>
                     </select>
-                    <button
-                        type="button"
-                        class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
-                        @click="setPrimary(account)"
-                    >
+                    <button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50" @click="setPrimary(account)">
                         Jadikan utama
                     </button>
                     <button
                         type="button"
                         class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-800 disabled:opacity-50"
-                        :disabled="syncingId === account.id"
+                        :disabled="syncingId === account.id || account.type !== 'page'"
                         @click="syncAccount(account)"
                     >
-                        {{ syncingId === account.id ? 'Sync...' : 'Sync Insights' }}
+                        {{ account.type !== 'page' ? 'Sync (Page only)' : (syncingId === account.id ? 'Sync...' : 'Sync Insights') }}
                     </button>
                 </div>
-                <p v-if="account.last_synced_at" class="mt-3 text-xs text-slate-500">Terakhir sync: {{ account.last_synced_at }}</p>
             </article>
 
             <div v-if="!accounts.length" class="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500">
-                Belum ada akun. Klik <strong>Hubungkan Meta</strong> dan login sebagai Kea Abbasy.
+                Belum wajib. Fokus ke Watchlist dulu.
             </div>
         </div>
     </div>

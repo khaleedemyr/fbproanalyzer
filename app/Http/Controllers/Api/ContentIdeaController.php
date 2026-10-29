@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ContentIdea;
-use App\Models\ContentPost;
 use App\Models\WatchlistPost;
+use App\Services\ViralScoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -76,46 +76,29 @@ class ContentIdeaController extends Controller
     public function generate(Request $request): JsonResponse
     {
         $user = $request->user();
-
-        $topOwn = ContentPost::query()
-            ->where('user_id', $user->id)
-            ->orderByDesc('viral_score')
-            ->limit(5)
-            ->get();
+        $scorer = app(ViralScoreService::class);
 
         $topWatch = WatchlistPost::query()
             ->where('user_id', $user->id)
             ->orderByDesc('estimated_score')
-            ->limit(5)
+            ->limit(8)
             ->get();
 
         $generated = [];
 
-        foreach ($topOwn as $post) {
-            $cluster = $post->topic_cluster ?: 'psikologi';
-            $generated[] = $user->contentIdeas()->create([
-                'meta_account_id' => $post->meta_account_id,
-                'title' => 'Remix: '.str($post->message ?: 'Konten menang')->limit(60),
-                'angle' => 'Ambil pola performa tinggi dari kontenmu sendiri, buat sudut baru yang lebih spesifik.',
-                'format' => $post->format === 'status' ? 'reel' : $post->format,
-                'hook' => 'Kalau kamu sering merasakan ini...',
-                'topic_cluster' => $cluster,
-                'potential_score' => min(95, (float) $post->viral_score + 5),
-                'status' => 'queued',
-                'notes' => 'Dihasilkan dari post sendiri #'.$post->id,
-            ]);
-        }
-
         foreach ($topWatch as $post) {
+            $cluster = $scorer->detectTopicCluster(($post->title ?? '').' '.($post->caption ?? '').' '.($post->hook_note ?? ''))
+                ?: 'psikologi';
+
             $generated[] = $user->contentIdeas()->create([
-                'title' => 'Adaptasi kompetitor: '.($post->title ?: str($post->caption ?: 'Pola viral')->limit(50)),
-                'angle' => 'Jangan copy. Ambil hook/struktur, tulis ulang dengan gaya Kea Abbasy + insight psikologi praktis.',
+                'title' => 'Versi Kea Abbasy: '.($post->title ?: str($post->caption ?: 'Pola viral niche')->limit(50)),
+                'angle' => 'Jangan copy. Ambil hook/struktur dari konten viral niche, tulis ulang dengan gaya Kea Abbasy + insight praktis.',
                 'format' => $post->format ?: 'reel',
-                'hook' => $post->hook_note ?: 'Ini yang jarang dibahas soal...',
-                'topic_cluster' => 'psikologi',
-                'potential_score' => min(92, (float) $post->estimated_score + 3),
+                'hook' => $post->hook_note ?: 'Kalau ini terasa familiar, kamu tidak sendiri...',
+                'topic_cluster' => $cluster,
+                'potential_score' => min(95, (float) $post->estimated_score + 4),
                 'status' => 'queued',
-                'notes' => 'Dari watchlist post #'.$post->id,
+                'notes' => 'Dari viral watchlist #'.$post->id,
             ]);
         }
 
@@ -135,7 +118,7 @@ class ContentIdeaController extends Controller
                     'topic_cluster' => $item['cluster'],
                     'potential_score' => 68,
                     'status' => 'queued',
-                    'notes' => 'Seed niche psikologi',
+                    'notes' => 'Seed niche psikologi — isi Watchlist agar ide lebih tajam',
                 ]);
             }
         }

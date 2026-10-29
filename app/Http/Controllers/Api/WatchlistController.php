@@ -26,6 +26,45 @@ class WatchlistController extends Controller
         return response()->json(['data' => $accounts]);
     }
 
+    public function seedPsychology(Request $request): JsonResponse
+    {
+        $seeds = [
+            ['name' => 'Psikologi Populer Indo', 'notes' => 'Seed: ganti URL ke creator nyata yang kamu pantau', 'facebook_url' => null],
+            ['name' => 'Self-worth & Healing', 'notes' => 'Seed niche harga diri / luka batin', 'facebook_url' => null],
+            ['name' => 'Relationship Talk', 'notes' => 'Seed niche hubungan / toxic pattern', 'facebook_url' => null],
+            ['name' => 'Anxiety & Overthinking', 'notes' => 'Seed niche cemas / overthinking', 'facebook_url' => null],
+            ['name' => 'Trauma Informed Edu', 'notes' => 'Seed edukasi trauma ringan', 'facebook_url' => null],
+            ['name' => 'Psikolog Creator A', 'notes' => 'Ganti nama + URL creator yang sering muncul di FYP', 'facebook_url' => null],
+            ['name' => 'Psikolog Creator B', 'notes' => 'Ganti nama + URL creator yang sering muncul di FYP', 'facebook_url' => null],
+            ['name' => 'Relatable Story Page', 'notes' => 'Konten cerita + insight psikologi', 'facebook_url' => null],
+        ];
+
+        $created = [];
+        foreach ($seeds as $seed) {
+            $exists = $request->user()->watchlistAccounts()
+                ->where('name', $seed['name'])
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            $created[] = $request->user()->watchlistAccounts()->create([
+                ...$seed,
+                'niche' => 'psikologi',
+                'is_active' => true,
+            ]);
+        }
+
+        return response()->json([
+            'created' => count($created),
+            'data' => $request->user()->watchlistAccounts()->withCount('posts')->orderBy('name')->get(),
+            'message' => count($created)
+                ? 'Seed creator psikologi ditambahkan. Ganti nama/URL ke akun nyata yang kamu pantau.'
+                : 'Seed sudah ada. Tambah creator nyata atau catat post viral.',
+        ]);
+    }
+
     public function storeAccount(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -58,6 +97,7 @@ class WatchlistController extends Controller
             ->where('user_id', $request->user()->id)
             ->with('account:id,name,niche')
             ->when($request->filled('account_id'), fn ($q) => $q->where('watchlist_account_id', $request->integer('account_id')))
+            ->when($request->filled('format'), fn ($q) => $q->where('format', $request->string('format')))
             ->orderByDesc('estimated_score')
             ->paginate(20);
 
@@ -70,7 +110,7 @@ class WatchlistController extends Controller
             'watchlist_account_id' => ['required', 'exists:watchlist_accounts,id'],
             'title' => ['nullable', 'string', 'max:160'],
             'caption' => ['nullable', 'string'],
-            'post_url' => ['nullable', 'url', 'max:255'],
+            'post_url' => ['nullable', 'url', 'max:2048'],
             'format' => ['nullable', 'string', 'max:40'],
             'likes' => ['nullable', 'integer', 'min:0'],
             'comments' => ['nullable', 'integer', 'min:0'],
@@ -98,5 +138,13 @@ class WatchlistController extends Controller
         ]);
 
         return response()->json(['data' => $post->load('account:id,name')], 201);
+    }
+
+    public function destroyPost(Request $request, WatchlistPost $watchlistPost): JsonResponse
+    {
+        abort_unless($watchlistPost->user_id === $request->user()->id, 403);
+        $watchlistPost->delete();
+
+        return response()->json(['ok' => true]);
     }
 }
