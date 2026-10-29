@@ -9,7 +9,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('avatar')->nullable()->after('email');
+            $table->text('avatar')->nullable()->after('email');
             $table->string('meta_user_id')->nullable()->unique()->after('avatar');
         });
 
@@ -22,7 +22,7 @@ return new class extends Migration
             $table->string('type')->default('page'); // page|profile
             $table->string('niche')->default('psikologi');
             $table->string('category')->nullable();
-            $table->string('picture_url')->nullable();
+            $table->text('picture_url')->nullable();
             $table->text('access_token')->nullable();
             $table->timestamp('token_expires_at')->nullable();
             $table->boolean('is_primary')->default(false);
@@ -37,10 +37,10 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('meta_account_id')->constrained()->cascadeOnDelete();
             $table->string('meta_post_id')->unique();
-            $table->string('permalink')->nullable();
+            $table->text('permalink')->nullable();
             $table->string('format')->default('post'); // reel|photo|video|carousel|status|link
             $table->text('message')->nullable();
-            $table->string('media_url')->nullable();
+            $table->text('media_url')->nullable();
             $table->timestamp('published_at')->nullable();
             $table->unsignedBigInteger('reach')->default(0);
             $table->unsignedBigInteger('impressions')->default(0);
