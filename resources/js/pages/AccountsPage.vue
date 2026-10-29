@@ -6,34 +6,57 @@ import http, { ensureCsrf } from '../api/http';
 const route = useRoute();
 const accounts = ref([]);
 const loading = ref(true);
+const connecting = ref(false);
 const message = ref('');
+const error = ref('');
 const syncingId = ref(null);
 
 async function load() {
     loading.value = true;
+    error.value = '';
     try {
         const { data } = await http.get('/meta/accounts');
         accounts.value = data.data;
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal memuat akun Meta.';
     } finally {
         loading.value = false;
     }
 }
 
 async function connectMeta() {
-    await ensureCsrf();
-    const { data } = await http.get('/meta/redirect');
-    window.location.href = data.url;
+    connecting.value = true;
+    error.value = '';
+    message.value = 'Menyiapkan koneksi Meta...';
+
+    try {
+        await ensureCsrf();
+        const { data } = await http.get('/meta/redirect');
+
+        if (!data?.url) {
+            throw new Error('URL OAuth Meta kosong. Cek META_APP_ID di .env');
+        }
+
+        window.location.assign(data.url);
+    } catch (e) {
+        connecting.value = false;
+        message.value = '';
+        error.value = e.response?.data?.message
+            || e.message
+            || 'Gagal menghubungkan Meta. Cek App ID/Secret dan redirect URI.';
+    }
 }
 
 async function syncAccount(account) {
     syncingId.value = account.id;
     message.value = '';
+    error.value = '';
     try {
         const { data } = await http.post(`/meta/accounts/${account.id}/sync`);
         message.value = `Berhasil sync ${data.synced} postingan dari ${account.name}.`;
         await load();
     } catch (e) {
-        message.value = e.response?.data?.message || 'Sync gagal.';
+        error.value = e.response?.data?.message || 'Sync gagal.';
     } finally {
         syncingId.value = null;
     }
@@ -53,7 +76,7 @@ onMounted(async () => {
     if (route.query.meta === 'connected') {
         message.value = 'Meta berhasil terhubung. Pilih Page lalu Sync.';
     } else if (route.query.meta) {
-        message.value = `Status Meta: ${route.query.meta}`;
+        error.value = `Status Meta: ${route.query.meta}`;
     }
     await load();
 });
@@ -66,12 +89,18 @@ onMounted(async () => {
                 <h2 class="text-2xl font-semibold text-slate-900">Akun Meta</h2>
                 <p class="mt-1 text-sm text-slate-500">Hubungkan Personal Pro (Kea Abbasy) + Page, lalu sync Insights.</p>
             </div>
-            <button class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800" @click="connectMeta">
-                Hubungkan Meta
+            <button
+                type="button"
+                class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-wait disabled:opacity-70"
+                :disabled="connecting"
+                @click="connectMeta"
+            >
+                {{ connecting ? 'Menghubungkan...' : 'Hubungkan Meta' }}
             </button>
         </div>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>
+        <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</p>
 
         <div v-if="loading" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat akun...</div>
 
@@ -105,12 +134,14 @@ onMounted(async () => {
                         <option value="lainnya">lainnya</option>
                     </select>
                     <button
+                        type="button"
                         class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
                         @click="setPrimary(account)"
                     >
                         Jadikan utama
                     </button>
                     <button
+                        type="button"
                         class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-800 disabled:opacity-50"
                         :disabled="syncingId === account.id"
                         @click="syncAccount(account)"

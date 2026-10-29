@@ -19,11 +19,18 @@ class MetaAuthController extends Controller
 
     public function redirect(Request $request): JsonResponse
     {
+        if (blank(config('meta.app_id')) || blank(config('meta.app_secret'))) {
+            return response()->json([
+                'message' => 'META_APP_ID / META_APP_SECRET belum diisi di .env server.',
+            ], 422);
+        }
+
         $state = Str::random(40);
         $request->session()->put('meta_oauth_state', $state);
 
         return response()->json([
             'url' => $this->meta->authUrl($state),
+            'redirect_uri' => config('meta.redirect_uri'),
         ]);
     }
 
