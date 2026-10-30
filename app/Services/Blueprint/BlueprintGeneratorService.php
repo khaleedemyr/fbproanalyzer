@@ -925,6 +925,20 @@ class BlueprintGeneratorService
                     $decoded['scenes']
                 ));
 
+                // Outline panjang: isi VO kosong di scene non-bumper dari judul (bumper boleh kosong).
+                if ($format === self::FORMAT_REELS_PANJANG) {
+                    foreach ($scenes as &$sc) {
+                        $type = Str::lower((string) ($sc['visual_type'] ?? 'ai'));
+                        if (in_array($type, ['bumper', 'black'], true)) {
+                            continue;
+                        }
+                        if (trim((string) ($sc['vo'] ?? '')) === '') {
+                            $sc['vo'] = Str::limit($title.' — lanjut bahas '.$topic, 120, '');
+                        }
+                    }
+                    unset($sc);
+                }
+
                 if (! $this->scenesAreUsable($scenes, $format)) {
                     if ($this->isVisualPostFormat($format)) {
                         $errors[] = "{$model}: prompt gambar/i2v kosong atau teks belum baked-in";
@@ -2003,18 +2017,22 @@ TXT;
 
         $withVo = 0;
         $required = 0;
+        $firstContentVo = '';
         foreach ($scenes as $scene) {
-            $type = $scene['visual_type'] ?? 'ai';
+            $type = Str::lower((string) ($scene['visual_type'] ?? 'ai'));
             $vo = trim((string) ($scene['vo'] ?? ''));
             if ($format === self::FORMAT_REELS_VO) {
                 $required++;
                 if ($vo !== '') {
                     $withVo++;
                 }
-            } elseif ($type !== 'bumper') {
+            } elseif ($type !== 'bumper' && $type !== 'black') {
                 $required++;
                 if ($vo !== '') {
                     $withVo++;
+                    if ($firstContentVo === '') {
+                        $firstContentVo = $vo;
+                    }
                 }
             }
         }
@@ -2024,6 +2042,14 @@ TXT;
             $firstVo = trim((string) ($scenes[0]['vo'] ?? ''));
 
             return $firstVo !== '' && $withVo >= max(2, (int) ceil(count($scenes) * 0.8));
+        }
+
+        // Video panjang: outline sengaja ringkas + ada bumper kosong.
+        // Naskah penuh di-expand belakangan — jangan wajib ≥5 scene VO.
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            return $required > 0
+                && $firstContentVo !== ''
+                && $withVo >= max(2, (int) ceil($required * 0.5));
         }
 
         return $required > 0 && $withVo >= max(5, (int) ceil($required * 0.6));
