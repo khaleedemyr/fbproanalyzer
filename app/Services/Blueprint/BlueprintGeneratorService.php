@@ -370,7 +370,7 @@ class BlueprintGeneratorService
             'source_topic' => Str::limit($topic, 255, ''),
             'status' => 'generating',
             'format' => $format,
-            'engine' => 'pending',
+            'engine' => (! empty($options['use_ai']) && empty($options['skip_ai'])) ? 'pending_ai' : 'pending',
             'duration_seconds' => $this->durationSeconds,
             'beat_seconds' => $this->beatSeconds,
             'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? (bool) ($options['prefer_stock'] ?? false) : false,
@@ -408,10 +408,12 @@ class BlueprintGeneratorService
         $options['existing_blueprint_id'] = $stub->id;
         $options['background'] = true;
         $options['force'] = true;
-        // Default cepat: Brief Studio Compose sudah AI; expand lokal cukup untuk 45–60 mnt.
         if (! array_key_exists('use_ai', $options)) {
-            $options['use_ai'] = false;
-            $options['skip_ai'] = true;
+            $wantAi = $stub->engine === 'pending_ai';
+            $options['use_ai'] = $wantAi;
+            $options['skip_ai'] = ! $wantAi;
+        } else {
+            $options['skip_ai'] = ! (bool) $options['use_ai'];
         }
 
         $brief = null;
@@ -445,20 +447,29 @@ class BlueprintGeneratorService
     }
 
     /**
-     * Paksa selesaikan stub yang stuck di "generating" (Hostinger bunuh job diam-diam).
+     * Selesaikan stub generating. Pakai AI kalau diminta / engine pending_ai.
+     *
+     * @param  array{use_ai?:bool}  $extra
      */
-    public function finishGeneratingBlueprint(ContentBlueprint $stub, User $user): ContentBlueprint
+    public function finishGeneratingBlueprint(ContentBlueprint $stub, User $user, array $extra = []): ContentBlueprint
     {
         if ($stub->status !== 'generating' && $stub->status !== 'failed') {
             return $stub;
         }
 
-        @set_time_limit(120);
+        @set_time_limit(180);
         @ini_set('memory_limit', '512M');
         ignore_user_abort(true);
 
         $topic = (string) ($stub->source_topic ?: $stub->cover_theme ?: $stub->title ?: 'Konten viral');
         $minutes = max(5, (int) round(((int) ($stub->duration_seconds ?: 600)) / 60));
+        $wantAi = array_key_exists('use_ai', $extra)
+            ? (bool) $extra['use_ai']
+            : ($stub->engine === 'pending_ai');
+
+        if ($wantAi) {
+            BlueprintProgress::set($stub->id, 15, 'Memanggil AI Gemini untuk kerangka naskah…', 'generating');
+        }
 
         return $this->fillExistingBlueprint(
             $stub,
@@ -475,8 +486,8 @@ class BlueprintGeneratorService
                 'content_brief_id' => $stub->content_brief_id,
                 'analytics_ai_analysis_id' => $stub->analytics_ai_analysis_id,
                 'angle_finding_id' => $stub->angle_finding_id,
-                'use_ai' => false,
-                'skip_ai' => true,
+                'use_ai' => $wantAi,
+                'skip_ai' => ! $wantAi,
                 'force' => true,
                 'background' => true,
             ]
@@ -726,10 +737,8 @@ class BlueprintGeneratorService
 
         foreach ($models as $model) {
             try {
-                // Background boleh lebih lama; sync HTTP harus gagal cepat.
-                $httpTimeout = $format === self::FORMAT_REELS_PANJANG
-                    ? (($this->durationSeconds >= 600) ? 90 : 55)
-                    : 55;
+                // Kerangka panjang: timeout sedang (Hostinger ~120s). Gagal → fallback template.
+                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 50 : 55;
                 $response = Http::timeout($httpTimeout)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(

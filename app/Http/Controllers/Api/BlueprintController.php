@@ -97,10 +97,25 @@ class BlueprintController extends Controller
             ]);
         }
 
-        BlueprintProgress::set($blueprint->id, 10, 'Menyelesaikan generate…', 'generating');
+        $data = $request->validate([
+            'use_ai' => ['sometimes', 'boolean'],
+        ]);
+
+        $useAi = array_key_exists('use_ai', $data)
+            ? (bool) $data['use_ai']
+            : ($blueprint->engine === 'pending_ai');
+
+        BlueprintProgress::set(
+            $blueprint->id,
+            10,
+            $useAi ? 'Menyelesaikan dengan AI Gemini…' : 'Menyelesaikan generate…',
+            'generating'
+        );
 
         try {
-            $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user());
+            $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user(), [
+                'use_ai' => $useAi,
+            ]);
         } catch (\Throwable $e) {
             report($e);
             BlueprintProgress::set($blueprint->id, 0, 'Gagal: '.$e->getMessage(), 'failed');
@@ -114,7 +129,9 @@ class BlueprintController extends Controller
         BlueprintProgress::done($bp->id, 'Blueprint siap');
 
         return response()->json([
-            'message' => 'Blueprint panjang siap (expand dari Brief).',
+            'message' => $bp->engine === 'gemini'
+                ? 'Blueprint panjang siap (AI Gemini + expand timeline).'
+                : 'Blueprint panjang siap (template + expand).',
             'data' => $bp,
             'engine' => $bp->engine,
             'warning' => $generator->lastWarning(),

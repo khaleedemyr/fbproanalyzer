@@ -10,8 +10,10 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Dijalankan AFTER HTTP response (bukan antrean worker).
- * Jadi generate 1 jam + Gemini tidak diputus proxy Hostinger.
+ * Dijalankan AFTER HTTP response.
+ * - Tanpa AI: expand template cepat.
+ * - Dengan AI (pending_ai): biarkan frontend/finish-generate yang panggil Gemini
+ *   (request HTTP baru = budget waktu fresh, tidak diputus proxy diam-diam).
  */
 class GenerateBlueprintJob
 {
@@ -32,7 +34,7 @@ class GenerateBlueprintJob
     public function handle(BlueprintGeneratorService $generator): void
     {
         ignore_user_abort(true);
-        @set_time_limit(600);
+        @set_time_limit(180);
         @ini_set('memory_limit', '512M');
 
         $bp = ContentBlueprint::query()->find($this->blueprintId);
@@ -51,19 +53,38 @@ class GenerateBlueprintJob
             return;
         }
 
+        $wantAi = (bool) ($this->options['use_ai'] ?? false)
+            && ! (bool) ($this->options['skip_ai'] ?? false);
+        if ($bp->engine === 'pending_ai') {
+            $wantAi = true;
+        }
+
         $minutes = (int) ($this->options['duration_minutes'] ?? round(((int) ($bp->duration_seconds ?: 0)) / 60));
 
         Log::info('GenerateBlueprintJob.start', [
             'blueprint_id' => $bp->id,
             'format' => $this->format,
             'duration_minutes' => $minutes,
+            'use_ai' => $wantAi,
         ]);
-        BlueprintProgress::set($bp->id, 6, "Mulai generate {$minutes} menit…", 'generating');
+
+        // Mode AI: jangan Gemini di afterResponse (sering dibunuh Hostinger tanpa log).
+        // Frontend akan hit finish-generate dengan use_ai=true.
+        if ($wantAi) {
+            BlueprintProgress::set(
+                $bp->id,
+                12,
+                'Menunggu AI Gemini… (halaman detail akan lanjut otomatis)',
+                'generating'
+            );
+            Log::info('GenerateBlueprintJob.defer_ai', ['blueprint_id' => $bp->id]);
+
+            return;
+        }
+
+        BlueprintProgress::set($bp->id, 6, "Mulai generate {$minutes} menit (template)…", 'generating');
 
         try {
-            // Shared hosting sering bunuh proses >30–60s tanpa log.
-            // Video panjang: expand template cepat dari topic/hook Brief (Compose sudah AI).
-            // Jangan tunggu Gemini di sini — itu yang bikin stuck >5 menit.
             $options = $this->options;
             $options['background'] = true;
             $options['force'] = true;
@@ -87,7 +108,6 @@ class GenerateBlueprintJob
                 'blueprint_id' => $bp->id,
                 'engine' => $fresh?->engine,
                 'scenes' => count($fresh?->scenes ?? []),
-                'seconds' => null,
             ]);
         } catch (\Throwable $e) {
             report($e);

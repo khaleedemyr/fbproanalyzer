@@ -38,9 +38,11 @@ const isGenerating = computed(() => bp.value?.status === 'generating');
 const isFailed = computed(() => bp.value?.status === 'failed');
 const isAi = computed(() => bp.value?.engine === 'gemini');
 const engineLabel = computed(() => {
-    if (isGenerating.value) return 'Sedang generate…';
+    if (isGenerating.value) {
+        return bp.value?.engine === 'pending_ai' ? 'AI Gemini…' : 'Sedang generate…';
+    }
     if (isFailed.value) return 'Generate gagal';
-    if (bp.value?.engine === 'pending') return 'Menunggu worker…';
+    if (bp.value?.engine === 'pending' || bp.value?.engine === 'pending_ai') return 'Menunggu…';
     return isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint';
 });
 const beatSeconds = computed(() => bp.value?.beat_seconds || 5);
@@ -91,13 +93,23 @@ async function fetchProgress() {
     }
 }
 
-async function finishNow() {
+async function finishNow(forceAi = null) {
     if (finishing.value || !bp.value?.id) return;
     finishing.value = true;
     error.value = '';
-    progress.value = { percent: 10, message: 'Menyelesaikan generate…', status: 'generating' };
+    // Centang AI di Brief → engine pending_ai → wajib Gemini di sini.
+    const useAi = bp.value.engine === 'pending_ai' || forceAi === true;
+    progress.value = {
+        percent: 10,
+        message: useAi ? 'Memanggil AI Gemini…' : 'Menyelesaikan generate…',
+        status: 'generating',
+    };
     try {
-        const { data } = await http.post(`/blueprints/${bp.value.id}/finish-generate`, {}, { timeout: 120000 });
+        const { data } = await http.post(
+            `/blueprints/${bp.value.id}/finish-generate`,
+            { use_ai: useAi },
+            { timeout: 180000 }
+        );
         bp.value = data.data;
         if (data.progress) progress.value = data.progress;
         else progress.value = { percent: 100, message: 'Selesai', status: 'ready' };
@@ -119,13 +131,18 @@ function startPoll() {
     pollStartedAt = Date.now();
     finishRequested = false;
     progress.value = { percent: 5, message: 'Memulai…', status: 'generating' };
+    // Mode AI: langsung lanjut di request HTTP baru (jangan nunggu afterResponse yang sering mati).
+    if (bp.value?.engine === 'pending_ai') {
+        finishRequested = true;
+        setTimeout(() => finishNow(true), 400);
+    }
     pollTimer = setInterval(async () => {
         try {
             await fetchProgress();
-            // Setelah 12 detik masih generating → paksa selesai via request baru (fresh PHP time).
+            // Template path: setelah 12 dtk masih generating → finish tanpa AI.
             if (!finishRequested && Date.now() - pollStartedAt > 12000 && bp.value?.status === 'generating') {
                 finishRequested = true;
-                await finishNow();
+                await finishNow(bp.value.engine === 'pending_ai');
                 return;
             }
             const { data } = await http.get(`/blueprints/${route.params.id}`);
