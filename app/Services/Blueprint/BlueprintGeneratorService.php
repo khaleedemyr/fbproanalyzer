@@ -11,6 +11,7 @@ use App\Models\TrendSignal;
 use App\Models\User;
 use App\Support\BlueprintProgress;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -753,18 +754,29 @@ class BlueprintGeneratorService
             default => $this->geminiShortPrompt($kit, $title, $topic, $idea, $radarContext),
         };
 
-        $models = array_values(array_unique(array_filter([
-            (string) config('blueprint.gemini_model', 'gemini-3.8-flash'),
-            ...((array) config('blueprint.gemini_model_fallbacks', [])),
-        ])));
+        // Video panjang: 1 model saja (jangan cascade fallback × timeout — Hostinger bunuh request).
+        $primary = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
+        $fallbacks = (array) config('blueprint.gemini_model_fallbacks', []);
+        $models = $format === self::FORMAT_REELS_PANJANG
+            ? array_values(array_unique(array_filter([$primary])))
+            : array_values(array_unique(array_filter([$primary, ...$fallbacks])));
 
         $errors = [];
 
         foreach ($models as $model) {
             try {
-                // Kerangka panjang butuh waktu; Hostinger ~120–180s — sisakan ruang untuk expand.
-                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 70 : 55;
+                // Outline padat: target <40s. CLI boleh lebih longgar.
+                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 55 : 45;
+                $maxTokens = $format === self::FORMAT_REELS_PANJANG ? 4096 : 4096;
+                Log::info('blueprint.gemini.request', [
+                    'model' => $model,
+                    'format' => $format,
+                    'timeout' => $httpTimeout,
+                    'prompt_chars' => strlen($prompt),
+                ]);
+                $started = microtime(true);
                 $response = Http::timeout($httpTimeout)
+                    ->connectTimeout(10)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
@@ -773,13 +785,18 @@ class BlueprintGeneratorService
                                 'parts' => [['text' => $prompt]],
                             ]],
                             'generationConfig' => [
-                                'temperature' => 0.95,
+                                'temperature' => 0.9,
                                 'topP' => 0.95,
-                                'maxOutputTokens' => $format === self::FORMAT_REELS_PANJANG ? 8192 : 4096,
+                                'maxOutputTokens' => $maxTokens,
                                 'responseMimeType' => 'application/json',
                             ],
                         ]
                     );
+                Log::info('blueprint.gemini.response', [
+                    'model' => $model,
+                    'status' => $response->status(),
+                    'seconds' => round(microtime(true) - $started, 2),
+                ]);
 
                 if (! $response->successful()) {
                     $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
@@ -952,69 +969,44 @@ PROMPT;
         $totalSec = $this->durationSeconds;
         $visualBeat = $this->beatSeconds;
         $voBeat = $this->voBeatSeconds;
-        // Gemini tidak bisa isi 120–720 baris sekaligus — minta kerangka padat, expand di PHP.
+        // Hostinger bunuh request kalau minta puluhan scene. Minta kerangka bab padat; expand di PHP.
         $fullBeats = $this->voBeatCount();
-        $beatCount = $fullBeats <= 72 ? $fullBeats : 60;
         $minutes = max(1, (int) round($totalSec / 60));
+        $beatCount = min(14, max(10, 8 + (int) ceil($minutes / 10)));
         $preferStock = $this->preferStock
-            ? 'Campur: ~40% AI ilustrasi buku + ~40% stock + ~10% black + bumper antar bab.'
-            : 'UTAMAKAN AI ilustrasi buku (visual_type "ai") sebagai rangkaian plate seperti buku penjelasan. Sisipkan black jarang + bumper antar bab. Stock hanya jika benar-benar perlu (~10%).';
+            ? 'Campur AI ilustrasi buku + stock jarang + bumper antar bab.'
+            : 'UTAMAKAN visual_type "ai" ilustrasi buku. Bumper hanya antar bab.';
         $banned = $this->bannedHookPhrasesForPrompt();
         $bookStyle = $this->bookIllustrationStyleGuide();
-        $expandNote = $fullBeats > $beatCount
-            ? "PENTING: tulis tepat ~{$beatCount} scene kerangka berkualitas (bukan {$fullBeats}). Sistem akan men-expand ke timeline {$minutes} mnt penuh."
-            : "Tulis sekitar {$beatCount} scene sesuai durasi.";
 
         return <<<PROMPT
-Kamu adalah penulis MASTER BLUEPRINT VOD psikologi untuk brand "{$kit->name}".
-Durasi target {$totalSec}s (~{$minutes} mnt).
-Beat visual (ganti gambar): {$visualBeat}s · Beat naskah VO: {$voBeat}s.
-{$expandNote}
+Kamu menulis KERANGKA padat VOD psikologi untuk "{$kit->name}" (~{$minutes} mnt / {$totalSec}s).
+Beat visual {$visualBeat}s · beat naskah {$voBeat}s · timeline penuh ~{$fullBeats} baris akan di-expand sistem dari kerangkamu.
 {$preferStock}
 
-===== VISUAL VIDEO PANJANG = RANGKAIAN ILUSTRASI BUKU =====
-Setiap scene AI harus seperti HLMN BUKU / textbook psychology diagram (bukan stickman tuxedo, bukan cinematic person, bukan stock abstrak kosong).
-Style wajib di image_prompt:
+WAJIB: tepat {$beatCount} scene kerangka SAJA (bukan {$fullBeats}). Tiap scene VO = 1–2 kalimat tajam (bukan paragraf).
+
+Style image_prompt:
 {$bookStyle}
-
-ATURAN image_prompt scene AI:
-- WAJIB merepresentasikan ISI NASKAH VO scene itu (metafora visual dari kalimat VO).
-- 1 konsep jelas per plate: otak, filter sinyal, panah, ikon emosi, diagram proses, dll sesuai VO.
-- Boleh label tulisan tangan kecil di gambar (Bahasa Indonesia) yang relevan.
-- DILARANG stickman executive + bebek kuning (itu hanya untuk Reels pendek).
-- DILARANG photorealistic human portrait.
-- DILARANG image_prompt generik yang tidak nyambung VO.
-- motion_prompt: slow Ken Burns / gentle push-in on the illustration plate, keep diagram readable.
-
-Black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut". Bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB bumper akhir tiap bab.
-Stock (jika dipakai): deskripsi stock yang masih relevan topik, awali "(Video Stok 10 Detik): ...".
+- image_prompt = metafora dari VO; motion_prompt = slow Ken Burns.
+- DILARANG stickman tuxedo/bebek; DILARANG wajah fotoreal.
 
 Tema: {$title}
 Topik: {$topic}
-Hook ide (abaikan jika klise): {$hook}
+Hook: {$hook}
 Angle: {$angle}
-Sudut VO WAJIB: "{$this->voicePerspective}" (narasi dari sudut ini)
+Sudut VO: "{$this->voicePerspective}"
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
-Setiap scene timecode "MM:SS - MM:SS" sesuai beat naskah {$voBeat}s (gambar boleh sama untuk beberapa VO dalam 1 plate visual {$visualBeat}s).
+Struktur scene: GOLDEN HOOK (3) → BAB1 → bumper → BAB2 → bumper → BAB3 → PENUTUP.
+Hook = cerita nyata tokoh/kasus publik (tahun + konflik + twist).
 
-===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
-- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik relevan topik.
-- Format: tahun + situasi + konflik + twist → cliff ke topik.
-- 3 beat pertama WAJIB punya vo terisi (bukan bumper) + image_prompt ilustrasi buku yang mendukung cerita/konsep.
-
-DILARANG KERAS pembuka:
+DILARANG pembuka:
 {$banned}
 
-===== NASKAH =====
-- Hanya scene visual_type "bumper" yang boleh vo kosong.
-- Semua scene stock/ai/black WAJIB punya vo + on_screen dari sudut "{$this->voicePerspective}".
-- Field "caption" WAJIB terisi (hook + ringkas isi + CTA + hashtag).
-
-ATURAN: no metrik radar. Thumbnail boleh cinematic clickbait + teks judul di quotes (thumbnail boleh beda dari style buku).
-Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab saja).
-JSON SAJA dengan keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
-Setiap scene HARUS: timecode, visual_type, vo, on_screen, image_prompt, motion_prompt, section.
+JSON SAJA keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
+Setiap scene: section, timecode, visual_type, vo, on_screen, image_prompt, motion_prompt.
+Bumper boleh vo "". Scene lain WAJIB vo terisi. caption WAJIB ada.
 PROMPT;
     }
 

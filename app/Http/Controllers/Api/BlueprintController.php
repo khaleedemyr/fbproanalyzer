@@ -82,6 +82,7 @@ class BlueprintController extends Controller
 
     /**
      * Selesaikan blueprint yang stuck di status generating (job background dibunuh hosting).
+     * Reels panjang + AI: spawn CLI agar tidak diputus proxy Hostinger.
      */
     public function finishGenerate(Request $request, ContentBlueprint $blueprint, BlueprintGeneratorService $generator): JsonResponse
     {
@@ -90,47 +91,100 @@ class BlueprintController extends Controller
         @ini_set('memory_limit', '512M');
         ignore_user_abort(true);
 
+        $data = $request->validate([
+            'use_ai' => ['sometimes', 'boolean'],
+        ]);
+
+        // Reels panjang: AI wajib — tidak ada jalur template.
+        $useAi = $blueprint->format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
+            ? true
+            : (array_key_exists('use_ai', $data)
+                ? (bool) $data['use_ai']
+                : ($blueprint->engine === 'pending_ai'));
+
+        if (! in_array($blueprint->status, ['generating', 'failed'], true)) {
+            $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
+
+            return response()->json([
+                'message' => 'Blueprint sudah selesai.',
+                'data' => $blueprint,
+                'progress' => BlueprintProgress::get($blueprint->id),
+            ]);
+        }
+
         $lockKey = 'blueprint_finish_lock_'.$blueprint->id;
-        if (! Cache::add($lockKey, 1, now()->addMinutes(3))) {
+        if (Cache::has($lockKey)) {
             $blueprint->refresh();
             $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
+
+            return response()->json([
+                'message' => 'Generate sedang berjalan — tunggu progress (jangan refresh berulang).',
+                'data' => $blueprint,
+                'progress' => BlueprintProgress::get($blueprint->id),
+                'busy' => true,
+                'queued' => true,
+            ]);
+        }
+
+        Log::info('blueprint.finish.start', [
+            'blueprint_id' => $blueprint->id,
+            'use_ai' => $useAi,
+            'engine' => $blueprint->engine,
+        ]);
+
+        // Jalur aman Hostinger: AI panjang → CLI background (tanpa timeout proxy HTTP).
+        if ($useAi && $blueprint->format === BlueprintGeneratorService::FORMAT_REELS_PANJANG) {
+            if (! Cache::add($lockKey, 'spawn', now()->addMinutes(5))) {
+                $blueprint->refresh();
+                $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
+
+                return response()->json([
+                    'message' => 'Generate sedang berjalan — tunggu progress.',
+                    'data' => $blueprint,
+                    'progress' => BlueprintProgress::get($blueprint->id),
+                    'busy' => true,
+                    'queued' => true,
+                ]);
+            }
+
+            $blueprint->forceFill([
+                'status' => 'generating',
+                'engine' => 'pending_ai',
+            ])->save();
+            BlueprintProgress::set(
+                $blueprint->id,
+                18,
+                'Memanggil AI Gemini di background…',
+                'generating'
+            );
+
+            if ($this->spawnFinishWorker($blueprint->id, true)) {
+                return response()->json([
+                    'message' => 'AI Gemini diproses di background (bukan lewat browser). Tunggu 30–90 detik.',
+                    'data' => $blueprint->fresh()->load(['brandKit', 'analyticsAiAnalysis']),
+                    'progress' => BlueprintProgress::get($blueprint->id),
+                    'queued' => true,
+                    'can_retry_ai' => true,
+                ]);
+            }
+
+            Cache::forget($lockKey);
+            Log::warning('blueprint.finish.spawn_unavailable', ['blueprint_id' => $blueprint->id]);
+        }
+
+        if (! Cache::add($lockKey, 'http', now()->addMinutes(3))) {
+            $blueprint->refresh();
 
             return response()->json([
                 'message' => 'Generate sedang berjalan — tunggu sebentar.',
                 'data' => $blueprint,
                 'progress' => BlueprintProgress::get($blueprint->id),
                 'busy' => true,
+                'queued' => true,
             ]);
         }
 
         try {
-            if (! in_array($blueprint->status, ['generating', 'failed'], true)) {
-                $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
-
-                return response()->json([
-                    'message' => 'Blueprint sudah selesai.',
-                    'data' => $blueprint,
-                    'progress' => BlueprintProgress::get($blueprint->id),
-                ]);
-            }
-
-            $data = $request->validate([
-                'use_ai' => ['sometimes', 'boolean'],
-            ]);
-
-            // Reels panjang: AI wajib — tidak ada jalur template.
-            $useAi = $blueprint->format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
-                ? true
-                : (array_key_exists('use_ai', $data)
-                    ? (bool) $data['use_ai']
-                    : ($blueprint->engine === 'pending_ai'));
-
-            Log::info('blueprint.finish.start', [
-                'blueprint_id' => $blueprint->id,
-                'use_ai' => $useAi,
-                'engine' => $blueprint->engine,
-            ]);
-
             BlueprintProgress::set(
                 $blueprint->id,
                 10,
@@ -162,7 +216,6 @@ class BlueprintController extends Controller
                 ], 500);
             }
 
-            // AI diminta tapi hasilnya bukan gemini → anggap gagal (jangan simpan sebagai template).
             if ($useAi && $bp->engine !== 'gemini') {
                 $bp->forceFill([
                     'status' => 'failed',
@@ -201,6 +254,69 @@ class BlueprintController extends Controller
         } finally {
             Cache::forget($lockKey);
         }
+    }
+
+    /**
+     * Jalankan artisan blueprints:finish di proses terpisah (hindari kill proxy).
+     */
+    protected function spawnFinishWorker(int $blueprintId, bool $useAi): bool
+    {
+        $php = PHP_BINARY ?: 'php';
+        if (! is_string($php) || $php === '') {
+            $php = 'php';
+        }
+
+        $artisan = base_path('artisan');
+        $useFlag = $useAi ? '1' : '0';
+        $cmd = escapeshellarg($php).' '.escapeshellarg($artisan).' blueprints:finish '.$blueprintId.' --use_ai='.$useFlag;
+
+        Log::info('blueprint.finish.spawn_attempt', [
+            'blueprint_id' => $blueprintId,
+            'php' => $php,
+        ]);
+
+        try {
+            if (PHP_OS_FAMILY === 'Windows') {
+                if (! function_exists('popen')) {
+                    return false;
+                }
+                pclose(popen('start /B "" '.$cmd, 'r'));
+
+                return true;
+            }
+
+            if (function_exists('exec')) {
+                exec($cmd.' > /dev/null 2>&1 &');
+
+                return true;
+            }
+
+            if (function_exists('proc_open')) {
+                $descriptors = [
+                    0 => ['pipe', 'r'],
+                    1 => ['file', storage_path('logs/blueprint-finish-'.$blueprintId.'.log'), 'a'],
+                    2 => ['file', storage_path('logs/blueprint-finish-'.$blueprintId.'.log'), 'a'],
+                ];
+                $proc = proc_open($cmd.' &', $descriptors, $pipes, base_path());
+                if (is_resource($proc)) {
+                    foreach ($pipes as $pipe) {
+                        if (is_resource($pipe)) {
+                            fclose($pipe);
+                        }
+                    }
+                    proc_close($proc);
+
+                    return true;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('blueprint.finish.spawn_failed', [
+                'blueprint_id' => $blueprintId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return false;
     }
 
     public function generate(Request $request, BlueprintGeneratorService $generator): JsonResponse

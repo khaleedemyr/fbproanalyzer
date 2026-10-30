@@ -36,7 +36,9 @@ class FinishStuckBlueprints extends Command
             }
             $this->line("Finishing #{$bp->id} …");
             try {
-                $generator->finishGeneratingBlueprint($bp, $user);
+                $useAi = $bp->format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
+                    || $bp->engine === 'pending_ai';
+                $generator->finishGeneratingBlueprint($bp, $user, ['use_ai' => $useAi]);
                 $this->info("OK #{$bp->id}");
             } catch (\Throwable $e) {
                 $this->error("#{$bp->id}: ".$e->getMessage());

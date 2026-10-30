@@ -98,7 +98,7 @@ async function finishNow(forceAi = null) {
     finishing.value = true;
     error.value = '';
     // Centang AI di Brief → engine pending_ai → wajib Gemini di sini.
-    const useAi = bp.value.engine === 'pending_ai' || forceAi === true;
+    const useAi = bp.value.engine === 'pending_ai' || forceAi === true || isLong.value;
     progress.value = {
         percent: 10,
         message: useAi ? 'Memanggil AI Gemini…' : 'Menyelesaikan generate…',
@@ -108,29 +108,53 @@ async function finishNow(forceAi = null) {
         const { data } = await http.post(
             `/blueprints/${bp.value.id}/finish-generate`,
             { use_ai: useAi },
-            { timeout: 180000 }
+            { timeout: 90000 }
         );
         bp.value = data.data;
         if (data.progress) progress.value = data.progress;
-        else progress.value = { percent: 100, message: 'Selesai', status: 'ready' };
+        message.value = data.message || 'Blueprint siap.';
+
+        // Background CLI: pantau progress saja (jangan trigger finish lagi).
+        if (data.queued || data.busy || bp.value?.status === 'generating') {
+            message.value = data.message || 'AI Gemini jalan di background. Tunggu progress…';
+            finishRequested = true;
+            ensureProgressPoll();
+            return;
+        }
+
         markdown.value = '';
         stopPoll();
-        message.value = data.message || 'Blueprint siap.';
+        if (!data.progress) {
+            progress.value = { percent: 100, message: 'Selesai', status: 'ready' };
+        }
         if (bp.value?.status === 'failed') {
             error.value = bp.value.story_concept || 'Generate gagal.';
         }
     } catch (e) {
+        const status = e.response?.status;
         const msg = e.response?.data?.message
-            || (e.code === 'ECONNABORTED' ? 'Timeout menunggu AI Gemini. Klik “Coba AI lagi”.' : null)
+            || (e.code === 'ECONNABORTED'
+                ? 'Timeout HTTP. Kalau progress masih jalan, tunggu — AI mungkin di background.'
+                : null)
+            || (e.message === 'Network Error' || status === 502 || status === 504
+                ? 'Koneksi putus/proxy timeout. Cek progress dulu; kalau gagal klik “Coba AI lagi”.'
+                : null)
             || 'Gagal menyelesaikan generate.';
-        error.value = msg;
         if (e.response?.data?.data) {
             bp.value = e.response.data.data;
         }
         if (e.response?.data?.progress) {
             progress.value = e.response.data.progress;
         }
-        // Tetap bisa retry AI — jangan auto-template.
+        // Proxy putus tapi CLI mungkin masih jalan — pantau, jangan mark failed dulu.
+        if (bp.value?.status === 'generating' || e.response?.data?.queued) {
+            error.value = '';
+            message.value = msg + ' Progress tetap dipantau.';
+            finishRequested = true;
+            ensureProgressPoll();
+            return;
+        }
+        error.value = msg;
         if (bp.value) {
             bp.value = { ...bp.value, status: 'failed', engine: 'pending_ai' };
         }
@@ -147,6 +171,36 @@ async function retryAi() {
     await finishNow(true);
 }
 
+/** Poll status/progress tanpa memanggil finish-generate lagi. */
+function ensureProgressPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+        try {
+            await fetchProgress();
+            const { data } = await http.get(`/blueprints/${route.params.id}`);
+            bp.value = data.data;
+            if (data.progress) progress.value = data.progress;
+            if (data.data.status !== 'generating') {
+                markdown.value = data.markdown || '';
+                progress.value = {
+                    percent: data.data.status === 'failed' ? 0 : 100,
+                    message: data.data.status === 'failed' ? 'Gagal' : 'Selesai',
+                    status: data.data.status,
+                };
+                stopPoll();
+                if (data.data.status === 'ready' || data.data.status === 'scheduled') {
+                    message.value = 'Blueprint panjang siap.';
+                    error.value = '';
+                } else if (data.data.status === 'failed') {
+                    error.value = data.data.story_concept || 'Generate gagal.';
+                }
+            }
+        } catch {
+            /* keep polling */
+        }
+    }, 1500);
+}
+
 function startPoll() {
     stopPoll();
     pollStartedAt = Date.now();
@@ -157,32 +211,19 @@ function startPoll() {
         finishRequested = true;
         setTimeout(() => finishNow(true), 400);
     }
-    pollTimer = setInterval(async () => {
-        try {
-            await fetchProgress();
-            // Template path: setelah 12 dtk masih generating → finish tanpa AI.
-            if (!finishRequested && Date.now() - pollStartedAt > 12000 && bp.value?.status === 'generating') {
-                finishRequested = true;
-                await finishNow(bp.value.engine === 'pending_ai');
-                return;
-            }
-            const { data } = await http.get(`/blueprints/${route.params.id}`);
-            bp.value = data.data;
-            if (data.progress) progress.value = data.progress;
-            if (data.data.status !== 'generating') {
-                markdown.value = data.markdown || '';
-                progress.value = { percent: 100, message: 'Selesai', status: data.data.status };
-                stopPoll();
-                if (data.data.status === 'ready' || data.data.status === 'scheduled') {
-                    message.value = 'Blueprint panjang siap.';
-                } else if (data.data.status === 'failed') {
-                    error.value = data.data.story_concept || 'Generate gagal.';
-                }
-            }
-        } catch {
-            /* keep polling */
+    ensureProgressPoll();
+    // Cadangan: kalau finish belum pernah dipanggil (path non-AI), trigger setelah 12 dtk.
+    const backup = setInterval(async () => {
+        if (finishRequested || !bp.value || bp.value.status !== 'generating') {
+            clearInterval(backup);
+            return;
         }
-    }, 1500);
+        if (Date.now() - pollStartedAt > 12000) {
+            finishRequested = true;
+            clearInterval(backup);
+            await finishNow(bp.value.engine === 'pending_ai');
+        }
+    }, 2000);
 }
 
 async function load() {
