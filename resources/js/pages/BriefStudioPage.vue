@@ -24,7 +24,6 @@ const textDurationSeconds = ref(8);
 const visualBeatSeconds = ref(10);
 const voBeatSeconds = ref(5);
 const preferStock = ref(false);
-const useAi = ref(true);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -202,20 +201,16 @@ async function makeBlueprint() {
         if (needsVoice.value) {
             payload.voice_perspective = voicePerspective.value || 'Aku';
         }
+        payload.use_ai = true;
         if (isLong.value) {
             payload.duration_minutes = Number(durationMinutes.value);
             payload.visual_beat_seconds = Number(visualBeatSeconds.value);
             payload.vo_beat_seconds = Number(voBeatSeconds.value);
             payload.prefer_stock = !!preferStock.value;
-            payload.use_ai = true;
         } else if (isText.value) {
             payload.duration_seconds = Number(textDurationSeconds.value);
-            payload.use_ai = true;
         } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
-            payload.use_ai = true;
-        } else {
-            payload.use_ai = true;
         }
 
         // Panjang = async: server langsung balas stub, generate jalan setelah response.

@@ -118,9 +118,12 @@ class BlueprintController extends Controller
                 'use_ai' => ['sometimes', 'boolean'],
             ]);
 
-            $useAi = array_key_exists('use_ai', $data)
-                ? (bool) $data['use_ai']
-                : ($blueprint->engine === 'pending_ai');
+            // Reels panjang: AI wajib — tidak ada jalur template.
+            $useAi = $blueprint->format === BlueprintGeneratorService::FORMAT_REELS_PANJANG
+                ? true
+                : (array_key_exists('use_ai', $data)
+                    ? (bool) $data['use_ai']
+                    : ($blueprint->engine === 'pending_ai'));
 
             Log::info('blueprint.finish.start', [
                 'blueprint_id' => $blueprint->id,
