@@ -431,9 +431,9 @@ onMounted(async () => {
                         <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
                         Campur stock
                     </label>
-                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="Jalan di background — aman sampai 60 menit">
+                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="AI utama ada di Compose Resume; expand 45–60 mnt pakai kerangka lokal agar tidak macet Hostinger">
                         <input v-model="useAi" type="checkbox" class="rounded border-slate-300" />
-                        Pakai AI Gemini
+                        AI di Compose (expand lokal cepat)
                     </label>
                     <button
                         type="button"

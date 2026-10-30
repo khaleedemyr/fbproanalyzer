@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('radar:sync')->dailyAt('07:00');
+Schedule::command('blueprints:finish-stuck --minutes=2')->everyMinute();

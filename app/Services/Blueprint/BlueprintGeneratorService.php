@@ -331,7 +331,7 @@ class BlueprintGeneratorService
             'angle_finding_id' => $brief?->angle_finding_id ?? ($options['angle_finding_id'] ?? null),
             'title' => $title,
             'cover_theme' => Str::upper($title),
-            'story_concept' => "Sedang menyusun blueprint ~{$minutes} menit di background (AI + expand timeline). Halaman ini refresh otomatis…",
+            'story_concept' => "Sedang menyusun blueprint ~{$minutes} menit di background. Biasanya 15–40 detik. Halaman ini refresh otomatis…",
             'source_topic' => Str::limit($topic, 255, ''),
             'status' => 'generating',
             'format' => $format,
@@ -370,9 +370,10 @@ class BlueprintGeneratorService
         $options['existing_blueprint_id'] = $stub->id;
         $options['background'] = true;
         $options['force'] = true;
+        // Default cepat: Brief Studio Compose sudah AI; expand lokal cukup untuk 45–60 mnt.
         if (! array_key_exists('use_ai', $options)) {
-            $options['use_ai'] = true;
-            $options['skip_ai'] = false;
+            $options['use_ai'] = false;
+            $options['skip_ai'] = true;
         }
 
         $brief = null;
@@ -388,6 +389,10 @@ class BlueprintGeneratorService
             $signal = TrendSignal::query()->find($stub->trend_signal_id);
         }
 
+        if ($topic === '' || $topic === 'Konten viral') {
+            $topic = (string) ($stub->source_topic ?: $stub->cover_theme ?: $stub->title);
+        }
+
         return $this->generateFromTopic(
             $user,
             $topic,
@@ -398,6 +403,45 @@ class BlueprintGeneratorService
             $format,
             true,
             $options
+        );
+    }
+
+    /**
+     * Paksa selesaikan stub yang stuck di "generating" (Hostinger bunuh job diam-diam).
+     */
+    public function finishGeneratingBlueprint(ContentBlueprint $stub, User $user): ContentBlueprint
+    {
+        if ($stub->status !== 'generating' && $stub->status !== 'failed') {
+            return $stub;
+        }
+
+        @set_time_limit(120);
+        @ini_set('memory_limit', '512M');
+        ignore_user_abort(true);
+
+        $topic = (string) ($stub->source_topic ?: $stub->cover_theme ?: $stub->title ?: 'Konten viral');
+        $minutes = max(5, (int) round(((int) ($stub->duration_seconds ?: 600)) / 60));
+
+        return $this->fillExistingBlueprint(
+            $stub,
+            $user,
+            $topic,
+            (string) ($stub->format ?: self::FORMAT_REELS_PANJANG),
+            [
+                'duration_minutes' => $minutes,
+                'duration_seconds' => (int) ($stub->duration_seconds ?: $minutes * 60),
+                'visual_beat_seconds' => (int) ($stub->beat_seconds ?: 10),
+                'vo_beat_seconds' => (int) ($stub->vo_beat_seconds ?: 5),
+                'prefer_stock' => (bool) $stub->prefer_stock,
+                'voice_perspective' => (string) ($stub->voice_perspective ?: 'Aku'),
+                'content_brief_id' => $stub->content_brief_id,
+                'analytics_ai_analysis_id' => $stub->analytics_ai_analysis_id,
+                'angle_finding_id' => $stub->angle_finding_id,
+                'use_ai' => false,
+                'skip_ai' => true,
+                'force' => true,
+                'background' => true,
+            ]
         );
     }
 

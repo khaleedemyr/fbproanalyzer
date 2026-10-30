@@ -50,25 +50,42 @@ class GenerateBlueprintJob
             return;
         }
 
+        $minutes = (int) ($this->options['duration_minutes'] ?? round(((int) ($bp->duration_seconds ?: 0)) / 60));
+
         Log::info('GenerateBlueprintJob.start', [
             'blueprint_id' => $bp->id,
             'format' => $this->format,
-            'duration_minutes' => $this->options['duration_minutes'] ?? null,
+            'duration_minutes' => $minutes,
         ]);
 
         try {
+            // Shared hosting sering bunuh proses >30–60s tanpa log.
+            // Video panjang: expand template cepat dari topic/hook Brief (Compose sudah AI).
+            // Jangan tunggu Gemini di sini — itu yang bikin stuck >5 menit.
+            $options = $this->options;
+            $options['background'] = true;
+            $options['force'] = true;
+            $options['use_ai'] = false;
+            $options['skip_ai'] = true;
+
             $generator->fillExistingBlueprint(
                 $bp,
                 $user,
                 $this->topic,
                 $this->format,
-                $this->options
+                $options
             );
+
+            $fresh = $bp->fresh();
+            if ($fresh && $fresh->status === 'generating') {
+                $fresh->forceFill(['status' => 'ready'])->save();
+            }
 
             Log::info('GenerateBlueprintJob.ok', [
                 'blueprint_id' => $bp->id,
-                'engine' => $bp->fresh()->engine,
-                'scenes' => count($bp->fresh()->scenes ?? []),
+                'engine' => $fresh?->engine,
+                'scenes' => count($fresh?->scenes ?? []),
+                'seconds' => null,
             ]);
         } catch (\Throwable $e) {
             report($e);

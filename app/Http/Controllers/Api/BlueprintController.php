@@ -52,12 +52,55 @@ class BlueprintController extends Controller
 
         $blueprint->load(['brandKit', 'contentIdea', 'trendSignal', 'analyticsAiAnalysis']);
 
-        return response()->json([
-            'data' => $blueprint,
-            'markdown' => app(BlueprintGeneratorService::class)->toMarkdown(
+        $markdown = '';
+        if ($blueprint->status !== 'generating' && count($blueprint->scenes ?? []) <= 120) {
+            $markdown = app(BlueprintGeneratorService::class)->toMarkdown(
                 $blueprint,
                 $blueprint->brandKit ?? BrandKit::defaultFor($request->user())
-            ),
+            );
+        }
+
+        return response()->json([
+            'data' => $blueprint,
+            'markdown' => $markdown,
+        ]);
+    }
+
+    /**
+     * Selesaikan blueprint yang stuck di status generating (job background dibunuh hosting).
+     */
+    public function finishGenerate(Request $request, ContentBlueprint $blueprint, BlueprintGeneratorService $generator): JsonResponse
+    {
+        abort_unless($blueprint->user_id === $request->user()->id, 403);
+        @set_time_limit(120);
+        @ini_set('memory_limit', '512M');
+
+        if (! in_array($blueprint->status, ['generating', 'failed'], true)) {
+            $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
+
+            return response()->json([
+                'message' => 'Blueprint sudah selesai.',
+                'data' => $blueprint,
+            ]);
+        }
+
+        try {
+            $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user());
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Gagal menyelesaikan generate: '.$e->getMessage(),
+            ], 500);
+        }
+
+        $bp->load(['brandKit', 'analyticsAiAnalysis']);
+
+        return response()->json([
+            'message' => 'Blueprint panjang siap (expand dari Brief).',
+            'data' => $bp,
+            'engine' => $bp->engine,
+            'warning' => $generator->lastWarning(),
         ]);
     }
 

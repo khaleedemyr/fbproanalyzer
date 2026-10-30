@@ -13,7 +13,10 @@ const message = ref('');
 const error = ref('');
 const plannedDate = ref('');
 const plannedTime = ref('09:00');
+const finishing = ref(false);
 let pollTimer = null;
+let pollStartedAt = 0;
+let finishRequested = false;
 
 const scenes = computed(() => bp.value?.scenes || []);
 const format = computed(() => bp.value?.format || 'reels_vo');
@@ -77,10 +80,38 @@ function stopPoll() {
     }
 }
 
+async function finishNow() {
+    if (finishing.value || !bp.value?.id) return;
+    finishing.value = true;
+    error.value = '';
+    try {
+        const { data } = await http.post(`/blueprints/${bp.value.id}/finish-generate`, {}, { timeout: 120000 });
+        bp.value = data.data;
+        markdown.value = '';
+        stopPoll();
+        message.value = data.message || 'Blueprint siap.';
+        if (bp.value?.status === 'failed') {
+            error.value = bp.value.story_concept || 'Generate gagal.';
+        }
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal menyelesaikan generate.';
+    } finally {
+        finishing.value = false;
+    }
+}
+
 function startPoll() {
     stopPoll();
+    pollStartedAt = Date.now();
+    finishRequested = false;
     pollTimer = setInterval(async () => {
         try {
+            // Setelah 12 detik masih generating → paksa selesai via request baru (fresh PHP time).
+            if (!finishRequested && Date.now() - pollStartedAt > 12000) {
+                finishRequested = true;
+                await finishNow();
+                return;
+            }
             const { data } = await http.get(`/blueprints/${route.params.id}`);
             bp.value = data.data;
             if (data.data.status !== 'generating') {
@@ -175,7 +206,15 @@ onUnmounted(stopPoll);
 <template>
     <div class="space-y-6">
         <div v-if="isGenerating" class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950">
-            Menyusun blueprint panjang di background (bisa 1–3 menit untuk 60 mnt + AI). Jangan tutup tab — halaman ini refresh otomatis.
+            <p>Menyusun blueprint panjang… biasanya <strong>15–40 detik</strong>. Kalau lebih dari 1 menit, klik tombol di bawah.</p>
+            <button
+                type="button"
+                class="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                :disabled="finishing"
+                @click="finishNow"
+            >
+                {{ finishing ? 'Menyelesaikan…' : 'Selesaikan sekarang' }}
+            </button>
         </div>
         <div v-if="isFailed" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {{ bp?.story_concept || 'Generate gagal.' }}

@@ -152,7 +152,7 @@ class BriefStudioController extends Controller
 
         return response()->json([
             'message' => $async
-                ? 'Blueprint 5–60 menit mulai disusun di background (bisa sampai 1 jam). Halaman detail akan update otomatis.'
+                ? 'Blueprint panjang mulai disusun (biasanya 15–40 detik). Buka detail — kalau stuck, klik “Selesaikan sekarang”.'
                 : ('Blueprint dari Brief Studio siap'
                     .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template).')),
             'data' => [
