@@ -2114,8 +2114,8 @@ TXT;
     }
 
     /**
-     * Samakan timeline panjang: 1 baris per beat naskah (vo_beat), plate gambar per visual_beat.
-     * Contoh: visual 15s · naskah 5s → 3 baris VO beda, image_prompt sama dalam 1 plate.
+     * Timeline panjang berurutan: Hook → Bab1 → bumper → Bab2 → bumper → Bab3 → Penutup.
+     * 1 baris per vo_beat; plate gambar per visual_beat (dalam section yang sama).
      *
      * @param  array<int, array<string, mixed>>  $scenes
      * @return array<int, array<string, mixed>>
@@ -2132,83 +2132,375 @@ TXT;
             return [];
         }
 
-        // Pecah VO sumber jadi baris pendek (hindari blok 15s yang isinya sama terus).
-        $voLines = $this->flattenLongFormVoLines($source, $coverTheme, $topic);
-        $srcCount = count($source);
-        $voCount = count($voLines);
-
-        $out = [];
-        for ($i = 0; $i < $target; $i++) {
-            $src = $source[$i % $srcCount];
-            $type = Str::lower((string) ($src['visual_type'] ?? 'ai'));
-            if ($type === '') {
-                $type = 'ai';
-            }
-
-            // Bumper/black jarang: hanya tiap ganti bab kasar, jangan tiap baris.
-            if (in_array($type, ['bumper', 'black'], true) && ($i % max(6, intdiv($visualBeat, $voBeat) * 4)) !== 0) {
-                $type = 'ai';
-            }
-
-            $vo = $voLines[$i % $voCount];
-            $cycle = intdiv($i, $voCount);
-            if ($cycle > 0) {
-                $vo = $this->varyLongFormVoLine($vo, $topic, $i, $cycle);
-            }
-
-            $on = trim((string) ($src['on_screen'] ?? ''));
-            if ($on === '' || $cycle > 0 || str_contains(Str::lower($on), 'tahun 2023')) {
-                $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $coverTheme, 34, ''));
-            }
-
-            $start = $i * $voBeat;
-            $end = min($total, $start + $voBeat);
-
-            $out[] = [
-                'section' => (string) ($src['section'] ?? 'Blueprint'),
-                'timecode' => $this->formatTimecode($start, $end),
-                'visual_type' => $type === 'bumper' || $type === 'black' || $type === 'stock' ? $type : 'ai',
-                'image_prompt' => trim((string) ($src['image_prompt'] ?? '')),
-                'motion_prompt' => (string) ($src['motion_prompt'] ?? '-'),
-                'vo' => $vo,
-                'on_screen' => $on,
-                'beat_seconds' => $voBeat,
-                'visual_plate' => intdiv($start, $visualBeat),
-            ];
+        $segments = $this->buildOrderedLongFormSegments($source, $coverTheme, $topic);
+        if ($segments === []) {
+            return [];
         }
 
-        // Satu plate visual = satu image_prompt untuk semua baris naskah dalam window visualBeat.
-        $platePrompt = [];
-        $plateType = [];
-        $plateMotion = [];
-        foreach ($out as $idx => $sc) {
-            $plate = (int) ($sc['visual_plate'] ?? 0);
-            $type = Str::lower((string) ($sc['visual_type'] ?? 'ai'));
+        $bumperIdx = [];
+        $contentIdx = [];
+        foreach ($segments as $i => $seg) {
+            if (($seg['kind'] ?? '') === 'bumper') {
+                $bumperIdx[] = $i;
+            } else {
+                $contentIdx[] = $i;
+            }
+        }
 
+        $bumperBeats = count($bumperIdx); // 1 beat per bumper
+        $contentBeats = max(count($contentIdx), $target - $bumperBeats);
+        $alloc = $this->allocateSegmentBeats($segments, $contentIdx, $contentBeats);
+
+        $out = [];
+        $globalBeat = 0;
+        $sectionPlateBase = 0;
+
+        foreach ($segments as $si => $seg) {
+            $kind = (string) ($seg['kind'] ?? 'content');
+            $section = (string) ($seg['section'] ?? 'BAB');
+            $beatsHere = $kind === 'bumper' ? 1 : max(1, (int) ($alloc[$si] ?? 1));
+            $voLines = $seg['vo_lines'] ?? [];
+            if ($voLines === [] && $kind !== 'bumper') {
+                $voLines = ["Bagian {$section} tentang {$topic}."];
+            }
+            $voCount = max(1, count($voLines));
+            $onBase = trim((string) ($seg['on_screen'] ?? ''));
+
+            // Plate index restart per section supaya gambar tidak nyampur antar bab.
+            $sectionPlateBase = $globalBeat > 0 ? (int) (($out[count($out) - 1]['visual_plate'] ?? 0) + 1) : 0;
+
+            for ($b = 0; $b < $beatsHere; $b++) {
+                $start = $globalBeat * $voBeat;
+                if ($start >= $total) {
+                    break 2;
+                }
+                $end = min($total, $start + $voBeat);
+
+                if ($kind === 'bumper') {
+                    $out[] = [
+                        'section' => 'BUMPER',
+                        'timecode' => $this->formatTimecode($start, $end),
+                        'visual_type' => 'bumper',
+                        'image_prompt' => 'Bumper KEA Abbasy — logo sting singkat, SFX brand, layar bersih.',
+                        'motion_prompt' => 'Quick logo sting, hold, soft fade.',
+                        'vo' => '',
+                        'on_screen' => 'KEA ABBASY',
+                        'beat_seconds' => $voBeat,
+                        'visual_plate' => $sectionPlateBase,
+                    ];
+                    $globalBeat++;
+                    continue;
+                }
+
+                $vo = (string) $voLines[$b % $voCount];
+                $cycle = intdiv($b, $voCount);
+                if ($cycle > 0) {
+                    $vo = $this->varyLongFormVoLine($vo, $topic, $globalBeat, $cycle);
+                }
+
+                $on = $onBase;
+                if ($on === '' || $cycle > 0) {
+                    $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $coverTheme, 34, ''));
+                }
+
+                $localPlate = intdiv($b * $voBeat, $visualBeat);
+
+                $out[] = [
+                    'section' => $section,
+                    'timecode' => $this->formatTimecode($start, $end),
+                    'visual_type' => 'ai',
+                    'image_prompt' => '',
+                    'motion_prompt' => 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.',
+                    'vo' => $vo,
+                    'on_screen' => $on,
+                    'beat_seconds' => $voBeat,
+                    'visual_plate' => $sectionPlateBase + $localPlate,
+                ];
+                $globalBeat++;
+            }
+        }
+
+        // Isi image_prompt per plate dari VO baris pertama plate (unik per bab/plate).
+        $platePrompt = [];
+        foreach ($out as $idx => $sc) {
+            $type = Str::lower((string) ($sc['visual_type'] ?? 'ai'));
             if (in_array($type, ['bumper', 'black'], true)) {
                 continue;
             }
-
+            $plate = (int) ($sc['visual_plate'] ?? 0);
             if (! isset($platePrompt[$plate])) {
                 $vo = (string) ($sc['vo'] ?? '');
                 $on = (string) ($sc['on_screen'] ?? '');
-                // Plate baru: prompt dari VO baris pertama plate (bukan VO gabungan usang).
-                $img = $this->bookIllustrationPrompt($vo !== '' ? $vo : $coverTheme, $topic, $on);
-                $platePrompt[$plate] = $img;
-                $plateType[$plate] = $type === 'stock' ? 'stock' : 'ai';
-                $plateMotion[$plate] = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
+                $platePrompt[$plate] = $this->bookIllustrationPrompt(
+                    $vo !== '' ? $vo : $coverTheme,
+                    $topic,
+                    $on
+                );
             }
-
-            if ($type === 'stock' && isset($plateType[$plate]) && $plateType[$plate] === 'stock') {
-                // keep stock prompt if first of plate was stock — but we regenerated book above.
-            }
-
             $out[$idx]['image_prompt'] = $platePrompt[$plate];
-            $out[$idx]['visual_type'] = $plateType[$plate];
-            $out[$idx]['motion_prompt'] = $plateMotion[$plate];
+            $out[$idx]['visual_type'] = 'ai';
+            $out[$idx]['motion_prompt'] = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
         }
 
         return $out;
+    }
+
+    /**
+     * Susun segmen berurutan dari outline Gemini + sisip bumper antar bab.
+     *
+     * @param  array<int, array<string, mixed>>  $source
+     * @return list<array{kind:string,section:string,vo_lines:list<string>,on_screen:string}>
+     */
+    protected function buildOrderedLongFormSegments(array $source, string $coverTheme, string $topic): array
+    {
+        $buckets = [];
+        foreach ($source as $s) {
+            $type = Str::lower((string) ($s['visual_type'] ?? 'ai'));
+            $section = $this->normalizeLongFormSection((string) ($s['section'] ?? ''), $type);
+            if ($type === 'bumper' || $section === 'BUMPER') {
+                $buckets[] = [
+                    'kind' => 'bumper',
+                    'section' => 'BUMPER',
+                    'vo_lines' => [],
+                    'on_screen' => 'KEA ABBASY',
+                ];
+                continue;
+            }
+            if ($type === 'black') {
+                // Black jarang: treat as short content pause with empty VO → skip as filler
+                continue;
+            }
+
+            $vo = trim((string) ($s['vo'] ?? ''));
+            $on = trim((string) ($s['on_screen'] ?? ''));
+            $last = $buckets !== [] ? count($buckets) - 1 : -1;
+            if ($last >= 0
+                && ($buckets[$last]['kind'] ?? '') === 'content'
+                && ($buckets[$last]['section'] ?? '') === $section
+            ) {
+                if ($vo !== '') {
+                    $buckets[$last]['vo_lines'][] = $vo;
+                }
+                if ($on !== '' && ($buckets[$last]['on_screen'] ?? '') === '') {
+                    $buckets[$last]['on_screen'] = $on;
+                }
+            } else {
+                $buckets[] = [
+                    'kind' => 'content',
+                    'section' => $section,
+                    'vo_lines' => $vo !== '' ? [$vo] : [],
+                    'on_screen' => $on,
+                ];
+            }
+        }
+
+        // Pastikan urutan standar + bumper antar bab.
+        $orderedKeys = ['GOLDEN HOOK', 'BAB 1', 'BAB 2', 'BAB 3', 'PENUTUP'];
+        $bySection = [];
+        foreach ($buckets as $b) {
+            if (($b['kind'] ?? '') !== 'content') {
+                continue;
+            }
+            $sec = $b['section'];
+            if (! isset($bySection[$sec])) {
+                $bySection[$sec] = $b;
+            } else {
+                $bySection[$sec]['vo_lines'] = array_merge(
+                    $bySection[$sec]['vo_lines'],
+                    $b['vo_lines']
+                );
+                if (($bySection[$sec]['on_screen'] ?? '') === '' && ($b['on_screen'] ?? '') !== '') {
+                    $bySection[$sec]['on_screen'] = $b['on_screen'];
+                }
+            }
+        }
+
+        // Fallback kalau outline Gemini tidak pakai label bab yang jelas.
+        if ($bySection === []) {
+            $allVo = $this->flattenLongFormVoLines($source, $coverTheme, $topic);
+            $chunk = max(1, (int) ceil(count($allVo) / 4));
+            $labels = ['GOLDEN HOOK', 'BAB 1', 'BAB 2', 'PENUTUP'];
+            foreach ($labels as $i => $label) {
+                $slice = array_slice($allVo, $i * $chunk, $chunk) ?: [Str::limit($topic, 80)];
+                $bySection[$label] = [
+                    'kind' => 'content',
+                    'section' => $label,
+                    'vo_lines' => array_values($slice),
+                    'on_screen' => Str::upper(Str::limit($label, 34, '')),
+                ];
+            }
+        }
+
+        $segments = [];
+        $prevContent = null;
+        foreach ($orderedKeys as $key) {
+            if (! isset($bySection[$key])) {
+                continue;
+            }
+            $seg = $bySection[$key];
+            $flat = $this->splitVoLinesOnly($seg['vo_lines'] ?? []);
+            $seg['vo_lines'] = $flat !== [] ? $flat : ["Bagian {$key}: {$topic}."];
+
+            // Bumper antar bab (setelah hook/bab, sebelum bab berikutnya / penutup).
+            if ($prevContent !== null && $prevContent !== 'PENUTUP') {
+                $segments[] = [
+                    'kind' => 'bumper',
+                    'section' => 'BUMPER',
+                    'vo_lines' => [],
+                    'on_screen' => 'KEA ABBASY',
+                ];
+            }
+
+            $segments[] = $seg;
+            $prevContent = $key;
+        }
+
+        // Sisakan section lain (kalau ada label custom) di tengah sebelum penutup.
+        foreach ($bySection as $key => $seg) {
+            if (in_array($key, $orderedKeys, true)) {
+                continue;
+            }
+            $flat = $this->splitVoLinesOnly($seg['vo_lines'] ?? []);
+            $seg['vo_lines'] = $flat !== [] ? $flat : ["Bagian {$key}."];
+            $insertAt = count($segments);
+            foreach ($segments as $i => $existing) {
+                if (($existing['section'] ?? '') === 'PENUTUP') {
+                    $insertAt = $i;
+                    break;
+                }
+            }
+            array_splice($segments, $insertAt, 0, [[
+                'kind' => 'bumper',
+                'section' => 'BUMPER',
+                'vo_lines' => [],
+                'on_screen' => 'KEA ABBASY',
+            ], $seg]);
+        }
+
+        return $segments;
+    }
+
+    /**
+     * Pecah VO jadi baris pendek tanpa padding dummy (untuk per-bab).
+     *
+     * @param  list<string>  $lines
+     * @return list<string>
+     */
+    protected function splitVoLinesOnly(array $lines): array
+    {
+        $out = [];
+        foreach ($lines as $v) {
+            $v = trim((string) $v);
+            if ($v === '') {
+                continue;
+            }
+            $parts = preg_split('/(?<=[.!?…])\s+/u', $v) ?: [$v];
+            foreach ($parts as $p) {
+                $p = trim($p);
+                if ($p === '') {
+                    continue;
+                }
+                $words = preg_split('/\s+/u', $p) ?: [];
+                if (count($words) > 22) {
+                    for ($w = 0; $w < count($words); $w += 12) {
+                        $chunk = trim(implode(' ', array_slice($words, $w, 12)));
+                        if ($chunk !== '') {
+                            $out[] = $chunk.(str_ends_with($chunk, '.') ? '' : '.');
+                        }
+                    }
+                } else {
+                    $out[] = $p;
+                }
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    protected function normalizeLongFormSection(string $raw, string $visualType = 'ai'): string
+    {
+        if ($visualType === 'bumper') {
+            return 'BUMPER';
+        }
+        $s = Str::upper(trim($raw));
+        $s = preg_replace('/\s+/', ' ', $s) ?? $s;
+        if ($s === '' || $s === 'BLUEPRINT') {
+            return 'BAB 1';
+        }
+        if (str_contains($s, 'BUMPER')) {
+            return 'BUMPER';
+        }
+        if (preg_match('/HOOK|GOLDEN/', $s)) {
+            return 'GOLDEN HOOK';
+        }
+        if (preg_match('/PENUTUP|CLOSING|CTA|AKHIR/', $s)) {
+            return 'PENUTUP';
+        }
+        if (preg_match('/BAB\s*3|CHAPTER\s*3|BAGIAN\s*3/', $s)) {
+            return 'BAB 3';
+        }
+        if (preg_match('/BAB\s*2|CHAPTER\s*2|BAGIAN\s*2/', $s)) {
+            return 'BAB 2';
+        }
+        if (preg_match('/BAB\s*1|CHAPTER\s*1|BAGIAN\s*1/', $s)) {
+            return 'BAB 1';
+        }
+        if (preg_match('/BAB|CHAPTER|BAGIAN/', $s)) {
+            return 'BAB 1';
+        }
+
+        return Str::limit($s, 40, '');
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $segments
+     * @param  list<int>  $contentIdx
+     * @return array<int, int> index segment => jumlah beat
+     */
+    protected function allocateSegmentBeats(array $segments, array $contentIdx, int $contentBeats): array
+    {
+        $alloc = [];
+        $n = count($contentIdx);
+        if ($n === 0) {
+            return $alloc;
+        }
+
+        $weights = [];
+        foreach ($contentIdx as $i) {
+            $sec = Str::upper((string) ($segments[$i]['section'] ?? ''));
+            $weights[$i] = match (true) {
+                str_contains($sec, 'HOOK') => 18,
+                str_contains($sec, 'BAB 1') => 24,
+                str_contains($sec, 'BAB 2') => 24,
+                str_contains($sec, 'BAB 3') => 20,
+                str_contains($sec, 'PENUTUP') => 14,
+                default => 16,
+            };
+        }
+        $sumW = array_sum($weights) ?: 1;
+        $assigned = 0;
+        $last = $contentIdx[$n - 1];
+        foreach ($contentIdx as $i) {
+            if ($i === $last) {
+                continue;
+            }
+            $beats = max(2, (int) floor($contentBeats * ($weights[$i] / $sumW)));
+            $alloc[$i] = $beats;
+            $assigned += $beats;
+        }
+        $alloc[$last] = max(2, $contentBeats - $assigned);
+
+        // Kalau total kurang dari contentBeats karena floor, tambah ke bab tengah.
+        $gap = $contentBeats - array_sum($alloc);
+        $cursor = 0;
+        while ($gap > 0 && $n > 0) {
+            $i = $contentIdx[$cursor % $n];
+            $alloc[$i]++;
+            $gap--;
+            $cursor++;
+        }
+
+        return $alloc;
     }
 
     /**
