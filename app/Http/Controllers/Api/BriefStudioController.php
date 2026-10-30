@@ -18,13 +18,24 @@ class BriefStudioController extends Controller
             'topic' => ['nullable', 'string', 'max:255'],
             'trend_signal_ids' => ['nullable', 'array'],
             'trend_signal_ids.*' => ['integer'],
-            'angle_finding_id' => ['nullable', 'integer', 'exists:angle_findings,id'],
-            'analytics_ai_analysis_id' => ['nullable', 'integer', 'exists:analytics_ai_analyses,id'],
+            'angle_finding_id' => ['nullable', 'integer'],
+            'analytics_ai_analysis_id' => ['nullable', 'integer'],
         ]);
 
-        return response()->json([
-            'data' => $studio->sources($request->user(), $filters),
-        ]);
+        try {
+            return response()->json([
+                'data' => $studio->sources($request->user(), $filters),
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+            $hint = str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Base table')
+                ? ' Tabel database belum lengkap — di Hostinger jalankan: php artisan migrate --force'
+                : '';
+
+            return response()->json([
+                'message' => 'Gagal memuat sumber Brief Studio: '.$e->getMessage().$hint,
+            ], 500);
+        }
     }
 
     public function index(Request $request, BriefStudioService $studio): JsonResponse

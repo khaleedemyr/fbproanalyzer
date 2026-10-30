@@ -39,17 +39,37 @@ class BriefStudioService
                 : null,
             'analytics' => $picked['analytics']?->toAnalysisArray(),
             'available' => [
-                'radar_count' => TrendSignal::query()
+                'radar_count' => $this->safeCount(fn () => TrendSignal::query()
                     ->where('niche', config('radar.niche', 'psikologi'))
                     ->where(function ($q) {
                         $q->where('observed_at', '>=', now()->subDays(14))->orWhereNull('observed_at');
                     })
-                    ->count(),
-                'angle_count' => AngleFinding::query()->where('user_id', $user->id)->count(),
-                'analytics_count' => AnalyticsAiAnalysis::query()->where('user_id', $user->id)->count(),
+                    ->count()),
+                'angle_count' => $this->safeCount(fn () => AngleFinding::query()->where('user_id', $user->id)->count()),
+                'analytics_count' => $this->safeCount(fn () => AnalyticsAiAnalysis::query()->where('user_id', $user->id)->count()),
             ],
             'warnings' => $picked['warnings'],
         ];
+    }
+
+    protected function safeCount(callable $fn): int
+    {
+        try {
+            return (int) $fn();
+        } catch (\Throwable $e) {
+            if ($this->isMissingTable($e)) {
+                return 0;
+            }
+            throw $e;
+        }
+    }
+
+    protected function isMissingTable(\Throwable $e): bool
+    {
+        $msg = $e->getMessage();
+
+        return str_contains($msg, 'Base table or view not found')
+            || str_contains($msg, "doesn't exist");
     }
 
     /**
@@ -251,17 +271,25 @@ class BriefStudioService
         }
 
         $analytics = null;
-        if (! empty($filters['analytics_ai_analysis_id'])) {
-            $analytics = AnalyticsAiAnalysis::query()
-                ->where('user_id', $user->id)
-                ->find($filters['analytics_ai_analysis_id']);
-        } else {
-            $analytics = AnalyticsAiAnalysis::query()
-                ->where('user_id', $user->id)
-                ->orderByDesc('id')
-                ->first();
+        try {
+            if (! empty($filters['analytics_ai_analysis_id'])) {
+                $analytics = AnalyticsAiAnalysis::query()
+                    ->where('user_id', $user->id)
+                    ->find($filters['analytics_ai_analysis_id']);
+            } else {
+                $analytics = AnalyticsAiAnalysis::query()
+                    ->where('user_id', $user->id)
+                    ->orderByDesc('id')
+                    ->first();
+            }
+        } catch (\Throwable $e) {
+            if ($this->isMissingTable($e)) {
+                $warnings[] = 'Tabel analytics_ai_analyses belum ada — jalankan: php artisan migrate --force';
+            } else {
+                throw $e;
+            }
         }
-        if (! $analytics) {
+        if (! $analytics && ! collect($warnings)->contains(fn ($w) => str_contains($w, 'analytics_ai_analyses'))) {
             $warnings[] = 'Belum ada Analisa AI Analytics — sync YouTube lalu generate analisa.';
         }
 
