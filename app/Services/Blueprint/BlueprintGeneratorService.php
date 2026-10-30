@@ -717,6 +717,7 @@ Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab
 JSON SAJA dengan keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 Setiap scene HARUS: timecode, visual_type, vo, on_screen, image_prompt, motion_prompt, section.
 PROMPT;
+    }
 
     protected function bannedHookPhrasesForPrompt(): string
     {
