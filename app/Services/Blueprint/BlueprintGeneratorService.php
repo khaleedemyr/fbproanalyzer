@@ -1232,8 +1232,8 @@ TXT;
         $visualBeat = max(5, $this->beatSeconds);
         $voBeat = max(3, $this->voBeatSeconds);
         $total = $this->durationSeconds;
-        // Template cukup kerangka padat; normalizeLongFormTimeline yang menyesuaikan durasi penuh.
-        $count = min(72, max(24, intdiv($total, max($voBeat, 10))));
+        // Satu baris per beat naskah (mis. 5s). Visual plate digabung di normalize.
+        $count = max(2, min(720, intdiv($total, $voBeat)));
 
         $sectionDefs = [
             ['THE GOLDEN HOOK', 0.20, [
@@ -1919,6 +1919,7 @@ TXT;
 
     /**
      * Samakan timeline panjang: 1 baris per beat naskah (vo_beat), plate gambar per visual_beat.
+     * Contoh: visual 15s · naskah 5s → 3 baris VO beda, image_prompt sama dalam 1 plate.
      *
      * @param  array<int, array<string, mixed>>  $scenes
      * @return array<int, array<string, mixed>>
@@ -1928,63 +1929,54 @@ TXT;
         $voBeat = max(3, (int) $this->voBeatSeconds);
         $visualBeat = max(5, (int) $this->beatSeconds);
         $total = max($voBeat * 2, (int) $this->durationSeconds);
-        $rawTarget = max(2, intdiv($total, $voBeat));
-
-        // Cap scene rows supaya generate 30–60 mnt tidak timeout/OOM di shared hosting.
-        $maxScenes = 180;
-        $merge = $rawTarget > $maxScenes ? (int) ceil($rawTarget / $maxScenes) : 1;
-        $stepBeat = $voBeat * $merge;
-        $target = max(2, intdiv($total, $stepBeat));
-
-        if ($merge > 1) {
-            $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
-                ."Durasi panjang: tiap blok naskah ~{$stepBeat}s (gabungan {$merge}× beat {$voBeat}s) agar generate stabil.");
-        }
+        $target = max(2, min(720, intdiv($total, $voBeat)));
 
         $source = array_values(array_filter($scenes, fn ($s) => is_array($s)));
         if ($source === []) {
             return [];
         }
 
+        // Pecah VO sumber jadi baris pendek (hindari blok 15s yang isinya sama terus).
+        $voLines = $this->flattenLongFormVoLines($source, $coverTheme, $topic);
         $srcCount = count($source);
+        $voCount = count($voLines);
+
         $out = [];
         for ($i = 0; $i < $target; $i++) {
-            $srcIdx = (int) floor($i * $srcCount / $target);
-            $srcIdx = min($srcCount - 1, max(0, $srcIdx));
-            $src = $source[$srcIdx];
-
-            // Ambil beberapa sumber di window yang sama supaya VO tidak tipis saat digabung.
-            $vos = [];
-            $ons = [];
-            for ($m = 0; $m < $merge; $m++) {
-                $j = min($srcCount - 1, $srcIdx + $m);
-                $piece = $source[$j];
-                $v = trim((string) ($piece['vo'] ?? ''));
-                if ($v !== '' && ! in_array($v, $vos, true)) {
-                    $vos[] = $v;
-                }
-                $o = trim((string) ($piece['on_screen'] ?? ''));
-                if ($o !== '' && ! in_array($o, $ons, true)) {
-                    $ons[] = $o;
-                }
-            }
-
-            $start = $i * $stepBeat;
-            $end = min($total, $start + $stepBeat);
+            $src = $source[$i % $srcCount];
             $type = Str::lower((string) ($src['visual_type'] ?? 'ai'));
             if ($type === '') {
                 $type = 'ai';
             }
 
+            // Bumper/black jarang: hanya tiap ganti bab kasar, jangan tiap baris.
+            if (in_array($type, ['bumper', 'black'], true) && ($i % max(6, intdiv($visualBeat, $voBeat) * 4)) !== 0) {
+                $type = 'ai';
+            }
+
+            $vo = $voLines[$i % $voCount];
+            $cycle = intdiv($i, $voCount);
+            if ($cycle > 0) {
+                $vo = $this->varyLongFormVoLine($vo, $topic, $i, $cycle);
+            }
+
+            $on = trim((string) ($src['on_screen'] ?? ''));
+            if ($on === '' || $cycle > 0 || str_contains(Str::lower($on), 'tahun 2023')) {
+                $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $coverTheme, 34, ''));
+            }
+
+            $start = $i * $voBeat;
+            $end = min($total, $start + $voBeat);
+
             $out[] = [
                 'section' => (string) ($src['section'] ?? 'Blueprint'),
                 'timecode' => $this->formatTimecode($start, $end),
-                'visual_type' => $type,
+                'visual_type' => $type === 'bumper' || $type === 'black' || $type === 'stock' ? $type : 'ai',
                 'image_prompt' => trim((string) ($src['image_prompt'] ?? '')),
                 'motion_prompt' => (string) ($src['motion_prompt'] ?? '-'),
-                'vo' => $vos !== [] ? implode(' ', $vos) : trim((string) ($src['vo'] ?? '')),
-                'on_screen' => $ons[0] ?? trim((string) ($src['on_screen'] ?? '')),
-                'beat_seconds' => max($voBeat, $end - $start),
+                'vo' => $vo,
+                'on_screen' => $on,
+                'beat_seconds' => $voBeat,
                 'visual_plate' => intdiv($start, $visualBeat),
             ];
         }
@@ -2004,17 +1996,15 @@ TXT;
             if (! isset($platePrompt[$plate])) {
                 $vo = (string) ($sc['vo'] ?? '');
                 $on = (string) ($sc['on_screen'] ?? '');
-                $img = trim((string) ($sc['image_prompt'] ?? ''));
-                $looksBook = (bool) preg_match('/textbook|watercolor|hand-drawn|illustration plate|infographic|book plate|sketched/i', $img);
-                if ($img === '' || ! $looksBook || str_starts_with($img, '(Video Stok') || str_starts_with($img, '(Layar Hitam')) {
-                    $img = $this->bookIllustrationPrompt($vo !== '' ? $vo : $coverTheme, $topic, $on);
-                    $type = 'ai';
-                }
+                // Plate baru: prompt dari VO baris pertama plate (bukan VO gabungan usang).
+                $img = $this->bookIllustrationPrompt($vo !== '' ? $vo : $coverTheme, $topic, $on);
                 $platePrompt[$plate] = $img;
                 $plateType[$plate] = $type === 'stock' ? 'stock' : 'ai';
-                $plateMotion[$plate] = trim((string) ($sc['motion_prompt'] ?? '')) !== '' && ($sc['motion_prompt'] ?? '') !== '-'
-                    ? (string) $sc['motion_prompt']
-                    : 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
+                $plateMotion[$plate] = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
+            }
+
+            if ($type === 'stock' && isset($plateType[$plate]) && $plateType[$plate] === 'stock') {
+                // keep stock prompt if first of plate was stock — but we regenerated book above.
             }
 
             $out[$idx]['image_prompt'] = $platePrompt[$plate];
@@ -2023,6 +2013,83 @@ TXT;
         }
 
         return $out;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $source
+     * @return list<string>
+     */
+    protected function flattenLongFormVoLines(array $source, string $coverTheme, string $topic): array
+    {
+        $lines = [];
+        foreach ($source as $s) {
+            $v = trim((string) ($s['vo'] ?? ''));
+            if ($v === '') {
+                continue;
+            }
+            // Pecah kalau sebelumnya sudah digabung jadi paragraf panjang.
+            $parts = preg_split('/(?<=[.!?…])\s+/u', $v) ?: [$v];
+            foreach ($parts as $p) {
+                $p = trim($p);
+                if ($p === '') {
+                    continue;
+                }
+                // Kalau masih kebanyakan (gabungan spasi tanpa titik), potong per ~12 kata.
+                $words = preg_split('/\s+/u', $p) ?: [];
+                if (count($words) > 22) {
+                    for ($w = 0; $w < count($words); $w += 12) {
+                        $chunk = trim(implode(' ', array_slice($words, $w, 12)));
+                        if ($chunk !== '') {
+                            $lines[] = $chunk.(str_ends_with($chunk, '.') ? '' : '.');
+                        }
+                    }
+                } else {
+                    $lines[] = $p;
+                }
+            }
+        }
+
+        if ($lines === []) {
+            $lines = [
+                "Mari bedah: {$topic}.",
+                'Pola ini sering tidak terasa, sampai biayanya sudah mahal.',
+                'Kunci pertama: sadari bingkai percakapan.',
+                'Kunci kedua: jangan langsung membela diri.',
+                'Kunci ketiga: tanya balik motifnya.',
+            ];
+        }
+
+        // Pastikan cukup variasi untuk cycle panjang.
+        $extra = [
+            "Ini bukan soal menang argumen — soal merebut kendali narasi tentang {$topic}.",
+            'Kalau kamu buru-buru menjelaskan, bingkai lawan yang menang.',
+            'Diam 2 detik sering lebih kuat dari 20 kalimat pembelaan.',
+            'Catat polanya. Besok kamu akan ketemu lagi.',
+            'Ubah satu kebiasaan kecil hari ini, sebelum pola itu yang mengubahmu.',
+        ];
+        while (count($lines) < 40) {
+            foreach ($extra as $e) {
+                $lines[] = $e;
+                if (count($lines) >= 40) {
+                    break;
+                }
+            }
+        }
+
+        return array_values($lines);
+    }
+
+    protected function varyLongFormVoLine(string $vo, string $topic, int $index, int $cycle): string
+    {
+        $suffixes = [
+            " Itu lapisan ke-{$cycle} dari pola yang sama.",
+            ' Perhatikan lagi dari sudut berbeda.',
+            " Kaitkan dengan {$topic} di hidupmu.",
+            ' Jangan lewati detail ini.',
+            ' Simpan poin ini sebelum lanjut.',
+        ];
+
+        return rtrim($vo, " \t.").$suffixes[$index % count($suffixes)];
     }
 
     /**
