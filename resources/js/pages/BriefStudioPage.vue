@@ -24,7 +24,7 @@ const textDurationSeconds = ref(8);
 const visualBeatSeconds = ref(10);
 const voBeatSeconds = ref(5);
 const preferStock = ref(false);
-const useAi = ref(false);
+const useAi = ref(true);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -218,10 +218,11 @@ async function makeBlueprint() {
             payload.use_ai = true;
         }
 
+        // Panjang = async: server langsung balas stub, generate jalan setelah response.
         const { data } = await http.post(
             `/brief-studio/${brief.value.id}/blueprint`,
             payload,
-            { timeout: useAi.value && isLong.value ? 120000 : 90000 }
+            { timeout: 60000 }
         );
         message.value = data.message;
         brief.value = data.brief || brief.value;
@@ -430,9 +431,9 @@ onMounted(async () => {
                         <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
                         Campur stock
                     </label>
-                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="AI lambat di Hostinger sering putus tanpa log">
+                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="Jalan di background — aman sampai 60 menit">
                         <input v-model="useAi" type="checkbox" class="rounded border-slate-300" />
-                        Pakai AI Gemini (lambat)
+                        Pakai AI Gemini
                     </label>
                     <button
                         type="button"
@@ -440,7 +441,7 @@ onMounted(async () => {
                         :disabled="generating"
                         @click="makeBlueprint"
                     >
-                        {{ generating ? 'Generate Blueprint...' : (isLong && !useAi ? 'Generate cepat (template)' : 'Generate Blueprint dari Resume') }}
+                        {{ generating ? 'Memulai…' : (isLong ? 'Generate 5–60 mnt (background)' : 'Generate Blueprint dari Resume') }}
                     </button>
                 </div>
             </div>

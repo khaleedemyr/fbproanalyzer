@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import http from '../api/http';
 
@@ -13,6 +13,7 @@ const message = ref('');
 const error = ref('');
 const plannedDate = ref('');
 const plannedTime = ref('09:00');
+let pollTimer = null;
 
 const scenes = computed(() => bp.value?.scenes || []);
 const format = computed(() => bp.value?.format || 'reels_vo');
@@ -29,8 +30,15 @@ const formatLabel = computed(() => ({
     foto: 'Postingan Foto',
 })[format.value] || 'Reels VO');
 
+const isGenerating = computed(() => bp.value?.status === 'generating');
+const isFailed = computed(() => bp.value?.status === 'failed');
 const isAi = computed(() => bp.value?.engine === 'gemini');
-const engineLabel = computed(() => (isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint'));
+const engineLabel = computed(() => {
+    if (isGenerating.value) return 'Sedang generate…';
+    if (isFailed.value) return 'Generate gagal';
+    if (bp.value?.engine === 'pending') return 'Menunggu worker…';
+    return isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint';
+});
 const beatSeconds = computed(() => bp.value?.beat_seconds || 5);
 const voBeatSeconds = computed(() => bp.value?.vo_beat_seconds || beatSeconds.value);
 const durationLabel = computed(() => {
@@ -62,15 +70,47 @@ const groupedScenes = computed(() => {
     return groups;
 });
 
+function stopPoll() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+function startPoll() {
+    stopPoll();
+    pollTimer = setInterval(async () => {
+        try {
+            const { data } = await http.get(`/blueprints/${route.params.id}`);
+            bp.value = data.data;
+            if (data.data.status !== 'generating') {
+                markdown.value = data.markdown || '';
+                stopPoll();
+                if (data.data.status === 'ready' || data.data.status === 'scheduled') {
+                    message.value = 'Blueprint panjang siap.';
+                } else if (data.data.status === 'failed') {
+                    error.value = data.data.story_concept || 'Generate gagal.';
+                }
+            }
+        } catch {
+            /* keep polling */
+        }
+    }, 2500);
+}
+
 async function load() {
     loading.value = true;
     error.value = '';
+    stopPoll();
     try {
         const { data } = await http.get(`/blueprints/${route.params.id}`);
         bp.value = data.data;
         markdown.value = data.markdown || '';
         plannedDate.value = data.data.planned_date ? String(data.data.planned_date).slice(0, 10) : '';
         plannedTime.value = data.data.planned_time ? String(data.data.planned_time).slice(0, 5) : '09:00';
+        if (data.data.status === 'generating') {
+            startPoll();
+        }
     } catch (e) {
         error.value = e.response?.data?.message || 'Blueprint tidak ditemukan.';
     } finally {
@@ -129,10 +169,17 @@ async function copyText(text) {
 }
 
 onMounted(load);
+onUnmounted(stopPoll);
 </script>
 
 <template>
     <div class="space-y-6">
+        <div v-if="isGenerating" class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950">
+            Menyusun blueprint panjang di background (bisa 1–3 menit untuk 60 mnt + AI). Jangan tutup tab — halaman ini refresh otomatis.
+        </div>
+        <div v-if="isFailed" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {{ bp?.story_concept || 'Generate gagal.' }}
+        </div>
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
                 <button type="button" class="text-sm text-teal-700 hover:underline" @click="router.push({ name: 'blueprints' })">← Semua blueprint</button>
@@ -140,7 +187,7 @@ onMounted(load);
                     <span class="rounded bg-teal-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-teal-800">{{ formatLabel }}</span>
                     <span
                         class="rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
-                        :class="isAi ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-900'"
+                        :class="isGenerating ? 'bg-teal-100 text-teal-900' : isFailed ? 'bg-red-100 text-red-800' : isAi ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-900'"
                     >
                         {{ engineLabel }}
                     </span>

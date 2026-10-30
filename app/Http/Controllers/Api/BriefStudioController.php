@@ -141,19 +141,20 @@ class BriefStudioController extends Controller
             ], 500);
         }
 
-        $generator = app(BlueprintGeneratorService::class);
+        $async = $bp->status === 'generating';
 
-        Log::info('brief_studio.blueprint.ok', [
+        Log::info('brief_studio.blueprint.accepted', [
             'brief_id' => $contentBrief->id,
             'blueprint_id' => $bp->id,
-            'engine' => $bp->engine,
-            'scenes' => count($bp->scenes ?? []),
+            'status' => $bp->status,
+            'async' => $async,
         ]);
 
-        // Response ringan: scene besar sering bikin proxy putus setelah generate sukses.
         return response()->json([
-            'message' => 'Blueprint dari Brief Studio siap'
-                .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template cepat).'),
+            'message' => $async
+                ? 'Blueprint 5–60 menit mulai disusun di background (bisa sampai 1 jam). Halaman detail akan update otomatis.'
+                : ('Blueprint dari Brief Studio siap'
+                    .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template).')),
             'data' => [
                 'id' => $bp->id,
                 'title' => $bp->title,
@@ -168,7 +169,8 @@ class BriefStudioController extends Controller
             'brief' => $contentBrief->fresh()->toBriefArray(),
             'markdown' => '',
             'engine' => $bp->engine,
-            'warning' => $generator->lastWarning(),
+            'async' => $async,
+            'warning' => null,
         ], 201);
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Services\Brief;
 
+use App\Jobs\GenerateBlueprintJob;
 use App\Models\AnalyticsAiAnalysis;
 use App\Models\AngleFinding;
 use App\Models\BrandKit;
@@ -232,10 +233,8 @@ class BriefStudioService
 
         $visualBeat = $options['visual_beat_seconds'] ?? $options['beat_seconds'] ?? null;
         $isLong = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG;
-        // Default: video panjang pakai template cepat (hindari timeout hosting tanpa log).
-        $useAi = array_key_exists('use_ai', $options)
-            ? (bool) $options['use_ai']
-            : ! $isLong;
+        // Background: AI ON by default (bisa 1 jam). Sync pendek: AI ON.
+        $useAi = array_key_exists('use_ai', $options) ? (bool) $options['use_ai'] : true;
 
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,
@@ -245,14 +244,44 @@ class BriefStudioService
             'beat_seconds' => $visualBeat,
             'prefer_stock' => array_key_exists('prefer_stock', $options) ? (bool) $options['prefer_stock'] : null,
             'voice_perspective' => $options['voice_perspective'] ?? null,
+            'planned_date' => $options['planned_date'] ?? null,
             'planned_time' => $options['planned_time'] ?? null,
-            'force' => (bool) ($options['force'] ?? false),
+            'force' => true,
             'use_ai' => $useAi,
             'skip_ai' => ! $useAi,
             'analytics_ai_analysis_id' => $brief->analytics_ai_analysis_id,
-            'content_brief' => $brief,
+            'content_brief_id' => $brief->id,
             'angle_finding_id' => $brief->angle_finding_id,
         ], fn ($v) => $v !== null);
+
+        // Reels panjang (5–60 mnt): stub + generate AFTER response → proxy tidak putus.
+        if ($isLong) {
+            $bp = $this->blueprints->createGeneratingStub(
+                $user,
+                $topic,
+                $format,
+                $bpOptions,
+                $brief,
+                $signal
+            );
+
+            GenerateBlueprintJob::dispatchAfterResponse(
+                $bp->id,
+                $user->id,
+                $topic,
+                $format,
+                $bpOptions + ['background' => true]
+            );
+
+            $brief->forceFill([
+                'content_blueprint_id' => $bp->id,
+                'status' => 'used',
+            ])->save();
+
+            return $bp->fresh(['brandKit', 'analyticsAiAnalysis', 'contentBrief']);
+        }
+
+        $bpOptions['content_brief'] = $brief;
 
         if ($signal) {
             $bp = $this->blueprints->generateFromSignal(
@@ -260,7 +289,7 @@ class BriefStudioService
                 $signal,
                 $options['planned_date'] ?? null,
                 $format,
-                (bool) ($options['force'] ?? false),
+                true,
                 $bpOptions + ['override_topic' => $topic]
             );
         } else {
@@ -272,7 +301,7 @@ class BriefStudioService
                 null,
                 $options['planned_date'] ?? null,
                 $format,
-                (bool) ($options['force'] ?? false),
+                true,
                 $bpOptions
             );
         }

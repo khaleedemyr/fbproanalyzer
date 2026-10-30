@@ -138,18 +138,18 @@ class BlueprintGeneratorService
             }
         }
 
-        // Video panjang di shared hosting: Gemini sering >60–120s → proxy putus (log kosong di Laravel).
-        // Default template cepat; AI hanya jika use_ai=true.
+        // Background job: AI default ON. Request sync HTTP: AI default OFF (hindari proxy timeout).
+        $background = (bool) ($options['background'] ?? false);
         $useAi = array_key_exists('use_ai', $options)
             ? (bool) $options['use_ai']
-            : $format !== self::FORMAT_REELS_PANJANG;
+            : ($background || $format !== self::FORMAT_REELS_PANJANG);
         $skipAi = (bool) ($options['skip_ai'] ?? false) || ! $useAi;
 
         $gemini = null;
         if (! $skipAi) {
             $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
-        } elseif ($format === self::FORMAT_REELS_PANJANG) {
-            $this->lastWarning = 'Mode cepat (template) — centang “Pakai AI Gemini” jika mau kerangka AI (lebih lambat, rawan timeout hosting).';
+        } elseif ($format === self::FORMAT_REELS_PANJANG && ! $background) {
+            $this->lastWarning = 'Mode sync tanpa AI — untuk 1 jam pakai generate background (otomatis dari Brief Studio).';
         }
 
         if ($gemini !== null) {
@@ -269,6 +269,19 @@ class BlueprintGeneratorService
                 .'Kolom vo_beat_seconds belum ada di DB — jalankan: php artisan migrate --force');
         }
 
+        $existingId = (int) ($options['existing_blueprint_id'] ?? 0);
+        if ($existingId > 0) {
+            $existing = ContentBlueprint::query()
+                ->where('user_id', $user->id)
+                ->find($existingId);
+            if ($existing) {
+                unset($attrs['user_id']);
+                $existing->forceFill($attrs)->save();
+
+                return $existing->fresh();
+            }
+        }
+
         try {
             return ContentBlueprint::query()->create($attrs);
         } catch (\Throwable $e) {
@@ -282,6 +295,110 @@ class BlueprintGeneratorService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Stub langsung (status generating) supaya HTTP response tidak nunggu 1 jam.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    public function createGeneratingStub(
+        User $user,
+        string $topic,
+        string $format,
+        array $options = [],
+        ?ContentBrief $brief = null,
+        ?TrendSignal $signal = null,
+    ): ContentBlueprint {
+        $kit = BrandKit::defaultFor($user);
+        $format = $this->normalizeFormat($format);
+        $this->currentFormat = $format;
+        $this->applyDurationOptions($format, $options);
+        $this->voicePerspective = $this->normalizeVoicePerspective(
+            (string) ($options['voice_perspective'] ?? ($kit->voice_perspective ?: 'Aku'))
+        );
+        $plannedDate = $options['planned_date'] ?? null;
+        $plannedTime = $this->normalizePlannedTime($options['planned_time'] ?? null);
+        $minutes = max(1, (int) round($this->durationSeconds / 60));
+        $title = Str::limit(trim($topic) !== '' ? trim($topic) : 'Blueprint panjang', 120, '');
+
+        $attrs = [
+            'user_id' => $user->id,
+            'brand_kit_id' => $kit->id,
+            'trend_signal_id' => $signal?->id,
+            'analytics_ai_analysis_id' => $brief?->analytics_ai_analysis_id ?? ($options['analytics_ai_analysis_id'] ?? null),
+            'content_brief_id' => $brief?->id,
+            'angle_finding_id' => $brief?->angle_finding_id ?? ($options['angle_finding_id'] ?? null),
+            'title' => $title,
+            'cover_theme' => Str::upper($title),
+            'story_concept' => "Sedang menyusun blueprint ~{$minutes} menit di background (AI + expand timeline). Halaman ini refresh otomatis…",
+            'source_topic' => Str::limit($topic, 255, ''),
+            'status' => 'generating',
+            'format' => $format,
+            'engine' => 'pending',
+            'duration_seconds' => $this->durationSeconds,
+            'beat_seconds' => $this->beatSeconds,
+            'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? (bool) ($options['prefer_stock'] ?? false) : false,
+            'voice_perspective' => $this->voicePerspective,
+            'scenes' => [],
+            'thumbnail_prompt' => '',
+            'caption' => '',
+            'title_options' => null,
+            'planned_date' => $plannedDate,
+            'planned_time' => $plannedDate ? $plannedTime : null,
+        ];
+
+        if (Schema::hasColumn('content_blueprints', 'vo_beat_seconds')) {
+            $attrs['vo_beat_seconds'] = $this->voBeatSeconds;
+        }
+
+        return ContentBlueprint::query()->create($attrs);
+    }
+
+    /**
+     * Isi stub generating (dipanggil dari job afterResponse).
+     *
+     * @param  array<string, mixed>  $options
+     */
+    public function fillExistingBlueprint(
+        ContentBlueprint $stub,
+        User $user,
+        string $topic,
+        string $format,
+        array $options = [],
+    ): ContentBlueprint {
+        $options['existing_blueprint_id'] = $stub->id;
+        $options['background'] = true;
+        $options['force'] = true;
+        if (! array_key_exists('use_ai', $options)) {
+            $options['use_ai'] = true;
+            $options['skip_ai'] = false;
+        }
+
+        $brief = null;
+        if (! empty($options['content_brief_id'])) {
+            $brief = ContentBrief::query()->find($options['content_brief_id']);
+        } elseif ($stub->content_brief_id) {
+            $brief = ContentBrief::query()->find($stub->content_brief_id);
+            $options['content_brief'] = $brief;
+        }
+
+        $signal = null;
+        if ($stub->trend_signal_id) {
+            $signal = TrendSignal::query()->find($stub->trend_signal_id);
+        }
+
+        return $this->generateFromTopic(
+            $user,
+            $topic,
+            null,
+            null,
+            $signal,
+            $stub->planned_date?->format('Y-m-d'),
+            $format,
+            true,
+            $options
+        );
     }
 
     /**
@@ -527,8 +644,11 @@ class BlueprintGeneratorService
 
         foreach ($models as $model) {
             try {
-                // Hostinger/proxy biasanya potong request ~60–120s — jangan tunggu Gemini terlalu lama.
-                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 45 : 55)
+                // Background boleh lebih lama; sync HTTP harus gagal cepat.
+                $httpTimeout = $format === self::FORMAT_REELS_PANJANG
+                    ? (($this->durationSeconds >= 600) ? 90 : 55)
+                    : 55;
+                $response = Http::timeout($httpTimeout)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
