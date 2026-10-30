@@ -1125,42 +1125,53 @@ PROMPT;
      */
     protected function fitVoToBeat(string $vo, string $topic, string $section = ''): string
     {
-        $vo = trim(preg_replace('/\s+/u', ' ', $vo) ?? $vo);
-        if ($vo === '') {
+        $vo = $this->sanitizeSpokenVo($vo);
+        if ($vo === '' || $this->looksLikeMetaVo($vo)) {
             $vo = $this->sectionSeedLine($section !== '' ? $section : 'BAB', $topic, $topic);
         }
 
         $t = $this->targetVoWords();
         $words = preg_split('/\s+/u', $vo) ?: [];
-        $count = count($words);
         $vp = $this->voicePerspective;
 
-        if ($count < $t['min']) {
+        if (count($words) < $t['min']) {
             $fillers = [
-                "Ini pola yang sering {$vp} alami soal {$topic} tanpa sadar.",
-                "Perhatikan detailnya pelan-pelan supaya bingkai tidak digeser diam-diam.",
+                "Ini pola yang sering {$vp} alami tanpa sadar.",
+                'Perhatikan detailnya pelan-pelan supaya bingkai tidak digeser diam-diam.',
                 "Jangan buru-buru bereaksi; amati dulu siapa yang diuntungkan dari rasa iba {$vp}.",
                 "Kalau dilewatkan, {$vp} bisa kehilangan kendali percakapan dalam hitungan detik.",
-                "Simpan insight ini, karena lapisan berikutnya masih satu cerita yang sama.",
+                'Lapisan berikutnya masih satu cerita yang sama, jangan putus di tengah.',
             ];
             $i = 0;
             while (count($words) < $t['min'] && $i < 12) {
-                $extra = $fillers[$i % count($fillers)];
-                $vo = rtrim($vo, " \t.").'. '.$extra;
+                $vo = rtrim($vo, " \t.").'. '.$fillers[$i % count($fillers)];
                 $words = preg_split('/\s+/u', $vo) ?: [];
                 $i++;
             }
         }
 
         if (count($words) > $t['max']) {
-            $cut = array_slice($words, 0, $t['max']);
-            $vo = implode(' ', $cut);
+            $vo = implode(' ', array_slice($words, 0, $t['max']));
             if (! preg_match('/[.!?…]$/u', $vo)) {
                 $vo .= '.';
             }
         }
 
         return trim($vo);
+    }
+
+    /**
+     * Buang label internal (GOLDEN HOOK / BAB / Lanjut benang) dari teks yang dibaca VO.
+     */
+    protected function sanitizeSpokenVo(string $vo): string
+    {
+        $vo = trim(preg_replace('/\s+/u', ' ', $vo) ?? $vo);
+        $vo = preg_replace('/^\s*lanjut\s+benang\s*[:\-]?\s*/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\b(GOLDEN\s*HOOK|BAB\s*\d+|PENUTUP|BUMPER)\s*:\s*/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\buji satu situasi nyata\b.*$/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\bsupaya polanya kebaca\.?\s*$/iu', '', $vo) ?? $vo;
+
+        return trim($vo, " \t:-");
     }
 
     /**
@@ -2378,10 +2389,22 @@ TXT;
                     ? $b
                     : (int) min($voCount - 1, intdiv($b * $voCount, max(1, $beatsHere)));
                 $vo = $this->fitVoToBeat(
-                    trim((string) ($voLines[$lineIdx] ?? '')),
+                    $this->sanitizeSpokenVo((string) ($voLines[$lineIdx] ?? '')),
                     $topic,
                     $section
                 );
+                if ($this->looksLikeMetaVo($vo)) {
+                    $vo = $this->fitVoToBeat(
+                        $this->continueStoryFromPrevious(
+                            (string) ($voLines[max(0, $lineIdx - 1)] ?? $topic),
+                            $topic,
+                            $coverTheme,
+                            $lineIdx + 1
+                        ),
+                        $topic,
+                        $section
+                    );
+                }
                 $on = $this->onScreenFromVo($vo, $onSeed, $coverTheme, $lineIdx === 0);
                 $localPlate = intdiv($b * $voBeat, $visualBeat);
 
@@ -2481,14 +2504,36 @@ TXT;
         string $coverTheme,
         int $step,
     ): string {
+        return $this->continueStoryFromPrevious($prevVo, $topic, $coverTheme, max(1, $step));
+    }
+
+    /**
+     * Lanjutkan cerita dari kalimat sebelumnya — tanpa label bab / meta internal.
+     */
+    protected function continueStoryFromPrevious(
+        string $prevVo,
+        string $topic,
+        string $coverTheme,
+        int $step,
+    ): string {
         $vp = $this->voicePerspective;
-        $clip = Str::limit($this->voFingerprint($prevVo), 48, '');
+        $prev = $this->sanitizeSpokenVo($prevVo);
+        $clip = Str::limit($this->voFingerprint($prev), 40, '');
+        $shortTopic = Str::limit($topic, 40, '');
+
         $options = [
-            "Dari situ {$vp} melihat pola yang sama di {$topic}.",
-            'Bukan kebetulan — kerapuhan yang dipamerkan justru jadi umpan.',
-            "Begitu {$vp} masuk mode menyelamatkan, kendali percakapan sudah berpindah.",
-            "Hubungkan ke {$coverTheme}: siapa yang diuntungkan dari rasa iba {$vp}?",
-            "Setelah \"{$clip}\", {$vp} wajib tahan dulu sebelum bereaksi.",
+            "Dari momen itu, {$vp} mulai melihat siapa yang sebenarnya memegang kendali.",
+            'Yang tampak seperti kelembutan justru menutupi motif yang lebih gelap.',
+            "Begitu empati {$vp} terbuka, permintaan berikutnya datang pelan tapi mengikat.",
+            "Kalau {$vp} telusuri urutannya, tipuannya tidak lagi terasa kebetulan.",
+            "Di titik ini {$shortTopic} bekerja: membuat {$vp} merasa wajib menolong.",
+            "{$vp} tidak salah berempati — yang berbahaya adalah empati tanpa batas.",
+            $clip !== ''
+                ? "Setelah \"{$clip}\", penjaga {$vp} seharusnya naik, bukan turun."
+                : "Penjaga {$vp} seharusnya naik di sini, bukan turun.",
+            'Cerita ini masih satu benang: rasa iba dipakai sebagai pintu masuk kontrol.',
+            "Perhatikan siapa yang paling tenang saat {$vp} mulai panik menjelaskan diri.",
+            "Jangan putus di tengah: ingat motif di balik kerapuhan yang dipamerkan.",
         ];
 
         return $options[max(0, $step - 1) % count($options)];
@@ -2975,8 +3020,9 @@ Cover: {$coverTheme}
 
 {$blockText}
 
-Tulis SPINE pendek per bagian (bukan naskah penuh). Kalimat nyambung antar bab.
-DILARANG template "Latihan/Poin/Catatan N".
+Tulis SPINE pendek per bagian (bukan naskah penuh). Kalimat nyambung antar bab seperti cerita lisan.
+DILARANG keras di VO: "Lanjut benang", "GOLDEN HOOK:", "BAB 1:", "uji satu situasi", "Poin/Latihan/Catatan N".
+VO hanya narasi untuk penonton, tanpa label internal.
 Tiap kalimat {$voMin}-{$voMax} kata (sesuai beat naskah {$voBeatSec}s).
 
 JSON SAJA:
@@ -3067,76 +3113,74 @@ PROMPT;
         string $topic,
         string $coverTheme,
     ): array {
-        $lines = array_values(array_filter(array_map('trim', $lines)));
+        $lines = array_values(array_filter(array_map(
+            fn ($l) => $this->sanitizeSpokenVo((string) $l),
+            $lines
+        ), fn ($l) => $l !== '' && ! $this->looksLikeMetaVo($l)));
+
         if ($lines === []) {
             $lines = [$this->sectionSeedLine($section, $topic, $coverTheme)];
         }
-        if (count($lines) >= $need) {
-            return array_slice($lines, 0, $need);
+
+        $out = [];
+        foreach ($lines as $line) {
+            if (count($out) >= $need) {
+                break;
+            }
+            $fitted = $this->fitVoToBeat($line, $topic, $section);
+            if ($this->looksLikeMetaVo($fitted) || $this->voTooSimilarToAny($fitted, $out)) {
+                continue;
+            }
+            $out[] = $fitted;
         }
 
-        $vp = $this->voicePerspective;
-        $out = $lines;
-        $anchors = $lines;
-        $bridge = [
-            "Dari situ {$vp} mulai melihat polanya di {$topic}.",
-            "Bukan kebetulan — urutannya selalu sama: empati dulu, kontrol belakangan.",
-            "Perhatikan momen saat {$vp} merasa wajib menolong: di situlah bingkai bergeser.",
-            "Begitu penjaga turun, permintaan berikutnya terasa wajar meski merugikan.",
-            "{$vp} tidak salah berempati — yang berbahaya adalah empati tanpa batas.",
-            "Kembali ke benang merah {$coverTheme}: siapa yang diuntungkan dari rasa iba {$vp}?",
-            "Kalau kronologinya diulang pelan, tipuannya jadi terlihat.",
-            "Jadi langkah berikutnya sederhana: {$vp} tahan dulu, amati motif, baru gerak.",
-            "Ini masih satu cerita yang sama — hanya lapisan yang lebih dalam.",
-            "Simpan insight ini sebelum masuk bagian berikutnya tentang {$topic}.",
-        ];
-
-        $i = 0;
-        while (count($out) < $need) {
-            $prev = $out[count($out) - 1];
-            $anchor = $anchors[$i % count($anchors)];
-            $b = $bridge[$i % count($bridge)];
-            // Bridge selalu mengacu ke kalimat sebelumnya / anchor, bukan lompat topik.
-            $line = match ($i % 3) {
-                0 => $b,
-                1 => 'Setelah "'.Str::limit($this->voFingerprint($prev), 42).'", '.$vp.' wajib cek siapa yang menang soal '.$topic.'.',
-                default => Str::limit($anchor, 90).(str_ends_with(rtrim($anchor), '.') ? '' : '.').' Itu pintu ke lapisan berikutnya tentang '.$topic.'.',
-            };
-            $line = $this->fitVoToBeat($line, $topic, $section);
-            if (! $this->voTooSimilarToAny($line, $out) && ! $this->looksLikeMetaVo($line)) {
+        $guard = 0;
+        while (count($out) < $need && $guard < ($need * 3)) {
+            $prev = $out !== [] ? $out[count($out) - 1] : ($lines[0] ?? '');
+            $line = $this->fitVoToBeat(
+                $this->continueStoryFromPrevious($prev, $topic, $coverTheme, count($out) + 1),
+                $topic,
+                $section
+            );
+            if (! $this->looksLikeMetaVo($line) && ! $this->voTooSimilarToAny($line, $out)) {
                 $out[] = $line;
             } else {
                 $out[] = $this->fitVoToBeat(
-                    "Lanjut benang {$section}: {$vp} uji satu situasi nyata soal {$topic} hari ini supaya polanya kebaca.",
+                    $this->continueStoryFromPrevious($prev.' '.$topic, $topic, $coverTheme, $guard + 7),
                     $topic,
                     $section
                 );
             }
-            $i++;
+            $guard++;
         }
 
-        return array_map(
-            fn ($line) => $this->fitVoToBeat((string) $line, $topic, $section),
-            array_slice($out, 0, $need)
-        );
+        return array_slice($out, 0, $need);
     }
 
     protected function looksLikeMetaVo(string $line): bool
     {
-        return (bool) preg_match('/^\s*(poin|langkah|latihan|catatan|detail|peringatan)\s*\d+/iu', $line);
+        $l = Str::lower($line);
+
+        return (bool) preg_match(
+            '/lanjut\s+benang|golden\s*hook\s*:|^\s*bab\s*\d+\s*:|^\s*penutup\s*:|uji satu situasi|polanya kebaca|^\s*(poin|langkah|latihan|catatan|detail|peringatan)\s*\d+/iu',
+            $l
+        );
     }
 
     protected function sectionSeedLine(string $section, string $topic, string $coverTheme): string
     {
-        $sec = Str::upper($section);
+        $sec = Str::upper($this->normalizeLongFormSection($section));
+        $vp = $this->voicePerspective;
+        $short = Str::limit($topic, 50, '');
+
         if (str_contains($sec, 'HOOK')) {
-            return "Ada pola gelap di balik {$topic} yang jarang dibuka terang-terangan.";
+            return "Ada cerita nyata yang membuka pola gelap di balik {$short}, dan {$vp} perlu mendengarnya sampai selesai.";
         }
         if (str_contains($sec, 'PENUTUP')) {
-            return "Ringkas: {$this->voicePerspective} jaga bingkai, bukan membuktikan diri soal {$topic}.";
+            return "Ringkasnya: {$vp} jaga bingkai dan batas, bukan sibuk membuktikan diri soal {$short}.";
         }
 
-        return "Mari bedah bagian ini: {$topic} — {$coverTheme}.";
+        return "Dari sini {$vp} bedah bagaimana {$short} bekerja diam-diam dalam percakapan sehari-hari.";
     }
 
     /**
