@@ -9,6 +9,7 @@ use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
 use App\Models\TrendSignal;
 use App\Services\Blueprint\BlueprintGeneratorService;
+use App\Support\BlueprintProgress;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -63,6 +64,17 @@ class BlueprintController extends Controller
         return response()->json([
             'data' => $blueprint,
             'markdown' => $markdown,
+            'progress' => BlueprintProgress::get($blueprint->id),
+        ]);
+    }
+
+    public function progress(Request $request, ContentBlueprint $blueprint): JsonResponse
+    {
+        abort_unless($blueprint->user_id === $request->user()->id, 403);
+
+        return response()->json([
+            'data' => BlueprintProgress::get($blueprint->id),
+            'status' => $blueprint->fresh()->status,
         ]);
     }
 
@@ -81,13 +93,17 @@ class BlueprintController extends Controller
             return response()->json([
                 'message' => 'Blueprint sudah selesai.',
                 'data' => $blueprint,
+                'progress' => BlueprintProgress::get($blueprint->id),
             ]);
         }
+
+        BlueprintProgress::set($blueprint->id, 10, 'Menyelesaikan generate…', 'generating');
 
         try {
             $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user());
         } catch (\Throwable $e) {
             report($e);
+            BlueprintProgress::set($blueprint->id, 0, 'Gagal: '.$e->getMessage(), 'failed');
 
             return response()->json([
                 'message' => 'Gagal menyelesaikan generate: '.$e->getMessage(),
@@ -95,12 +111,14 @@ class BlueprintController extends Controller
         }
 
         $bp->load(['brandKit', 'analyticsAiAnalysis']);
+        BlueprintProgress::done($bp->id, 'Blueprint siap');
 
         return response()->json([
             'message' => 'Blueprint panjang siap (expand dari Brief).',
             'data' => $bp,
             'engine' => $bp->engine,
             'warning' => $generator->lastWarning(),
+            'progress' => BlueprintProgress::get($bp->id),
         ]);
     }
 

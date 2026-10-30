@@ -9,6 +9,7 @@ use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
 use App\Models\TrendSignal;
 use App\Models\User;
+use App\Support\BlueprintProgress;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -50,6 +51,8 @@ class BlueprintGeneratorService
     protected string $currentFormat = self::FORMAT_REELS_VO;
 
     protected string $voicePerspective = 'Aku';
+
+    protected ?int $progressBlueprintId = null;
 
     public function lastEngine(): string
     {
@@ -118,6 +121,9 @@ class BlueprintGeneratorService
         $this->lastEngine = 'template';
         $this->lastWarning = null;
         $this->wasDuplicate = false;
+        $this->progressBlueprintId = ! empty($options['existing_blueprint_id'])
+            ? (int) $options['existing_blueprint_id']
+            : null;
 
         $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
         $cleanTitle = $this->coverTitle($cleanTopic, $idea);
@@ -138,6 +144,8 @@ class BlueprintGeneratorService
             }
         }
 
+        $this->reportProgress(8, 'Menyiapkan kerangka naskah…');
+
         // Background job: AI default ON. Request sync HTTP: AI default OFF (hindari proxy timeout).
         $background = (bool) ($options['background'] ?? false);
         $useAi = array_key_exists('use_ai', $options)
@@ -147,6 +155,7 @@ class BlueprintGeneratorService
 
         $gemini = null;
         if (! $skipAi) {
+            $this->reportProgress(18, 'Memanggil AI Gemini…');
             $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
         } elseif ($format === self::FORMAT_REELS_PANJANG && ! $background) {
             $this->lastWarning = 'Mode sync tanpa AI — untuk 1 jam pakai generate background (otomatis dari Brief Studio).';
@@ -155,16 +164,19 @@ class BlueprintGeneratorService
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
+            $this->reportProgress(40, 'Kerangka AI siap, menyesuaikan timeline…');
             if ($format === self::FORMAT_REELS_PANJANG && $this->voBeatCount() > count($gemini['scenes'] ?? [])) {
                 $this->lastWarning = 'AI Gemini menulis kerangka naskah; sistem menyesuaikan ke durasi penuh (visual '.$this->beatSeconds.'s · naskah '.$this->voBeatSeconds.'s).';
             }
         } else {
+            $this->reportProgress(28, 'Menyusun template bab + naskah…');
             $payload = match ($format) {
                 self::FORMAT_REELS_PANJANG => $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea),
                 self::FORMAT_REELS_TEXT => $this->buildReelsTextTemplate($kit, $cleanTitle, $cleanTopic, $idea),
                 self::FORMAT_FOTO => $this->buildFotoTemplate($kit, $cleanTitle, $cleanTopic, $idea),
                 default => $this->buildShortTemplate($kit, $cleanTitle, $cleanTopic, $idea),
             };
+            $this->reportProgress(45, 'Template siap…');
         }
 
         $payload['cover_theme'] = Str::upper(trim((string) ($payload['cover_theme'] ?: $cleanTitle)));
@@ -176,16 +188,19 @@ class BlueprintGeneratorService
         $payload['scenes'] = $this->ensureSceneTimecodes($payload['scenes'] ?? []);
 
         if ($format === self::FORMAT_REELS_PANJANG) {
+            $this->reportProgress(55, 'Merapikan prompt ilustrasi buku…');
             $payload['scenes'] = $this->enrichLongFormBookVisuals(
                 $payload['scenes'],
                 (string) $payload['cover_theme'],
                 $cleanTopic
             );
+            $this->reportProgress(75, 'Expand timeline ke durasi penuh…');
             $payload['scenes'] = $this->normalizeLongFormTimeline(
                 $payload['scenes'],
                 (string) $payload['cover_theme'],
                 $cleanTopic
             );
+            $this->reportProgress(88, 'Menyusun caption & thumbnail…');
         }
 
         $payload['thumbnail_prompt'] = $this->ensureImagePromptHasText(
@@ -269,6 +284,8 @@ class BlueprintGeneratorService
                 .'Kolom vo_beat_seconds belum ada di DB — jalankan: php artisan migrate --force');
         }
 
+        $this->reportProgress(95, 'Menyimpan blueprint…');
+
         $existingId = (int) ($options['existing_blueprint_id'] ?? 0);
         if ($existingId > 0) {
             $existing = ContentBlueprint::query()
@@ -277,13 +294,19 @@ class BlueprintGeneratorService
             if ($existing) {
                 unset($attrs['user_id']);
                 $existing->forceFill($attrs)->save();
+                BlueprintProgress::done($existing->id, 'Blueprint siap');
+                $this->progressBlueprintId = null;
 
                 return $existing->fresh();
             }
         }
 
         try {
-            return ContentBlueprint::query()->create($attrs);
+            $created = ContentBlueprint::query()->create($attrs);
+            BlueprintProgress::done($created->id, 'Blueprint siap');
+            $this->progressBlueprintId = null;
+
+            return $created;
         } catch (\Throwable $e) {
             // Hostinger belum migrate: buang kolom baru lalu coba lagi.
             if (str_contains($e->getMessage(), 'vo_beat_seconds') && isset($attrs['vo_beat_seconds'])) {
@@ -291,10 +314,22 @@ class BlueprintGeneratorService
                 $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
                     .'Simpan tanpa vo_beat_seconds — jalankan migrate di server.');
 
-                return ContentBlueprint::query()->create($attrs);
+                $created = ContentBlueprint::query()->create($attrs);
+                BlueprintProgress::done($created->id, 'Blueprint siap');
+                $this->progressBlueprintId = null;
+
+                return $created;
             }
             throw $e;
         }
+    }
+
+    protected function reportProgress(int $percent, string $message): void
+    {
+        if (! $this->progressBlueprintId) {
+            return;
+        }
+        BlueprintProgress::set($this->progressBlueprintId, $percent, $message, 'generating');
     }
 
     /**
@@ -352,7 +387,10 @@ class BlueprintGeneratorService
             $attrs['vo_beat_seconds'] = $this->voBeatSeconds;
         }
 
-        return ContentBlueprint::query()->create($attrs);
+        $bp = ContentBlueprint::query()->create($attrs);
+        BlueprintProgress::set($bp->id, 5, 'Antrian generate dimulai…', 'generating');
+
+        return $bp;
     }
 
     /**

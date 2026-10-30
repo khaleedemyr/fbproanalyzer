@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\ContentBlueprint;
 use App\Models\User;
 use App\Services\Blueprint\BlueprintGeneratorService;
+use App\Support\BlueprintProgress;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Support\Facades\Log;
 
@@ -57,6 +58,7 @@ class GenerateBlueprintJob
             'format' => $this->format,
             'duration_minutes' => $minutes,
         ]);
+        BlueprintProgress::set($bp->id, 6, "Mulai generate {$minutes} menit…", 'generating');
 
         try {
             // Shared hosting sering bunuh proses >30–60s tanpa log.

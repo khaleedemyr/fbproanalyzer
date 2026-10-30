@@ -85,6 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('blueprints', [BlueprintController::class, 'index']);
     Route::post('blueprints/generate', [BlueprintController::class, 'generate']);
     Route::get('blueprints/{blueprint}', [BlueprintController::class, 'show']);
+    Route::get('blueprints/{blueprint}/progress', [BlueprintController::class, 'progress']);
     Route::post('blueprints/{blueprint}/finish-generate', [BlueprintController::class, 'finishGenerate']);
     Route::patch('blueprints/{blueprint}', [BlueprintController::class, 'update']);
     Route::delete('blueprints/{blueprint}', [BlueprintController::class, 'destroy']);

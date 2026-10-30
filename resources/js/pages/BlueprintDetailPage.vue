@@ -14,6 +14,7 @@ const error = ref('');
 const plannedDate = ref('');
 const plannedTime = ref('09:00');
 const finishing = ref(false);
+const progress = ref({ percent: 0, message: '', status: 'generating' });
 let pollTimer = null;
 let pollStartedAt = 0;
 let finishRequested = false;
@@ -80,13 +81,26 @@ function stopPoll() {
     }
 }
 
+async function fetchProgress() {
+    try {
+        const { data } = await http.get(`/blueprints/${route.params.id}/progress`);
+        if (data.data) progress.value = data.data;
+        if (data.status && bp.value) bp.value = { ...bp.value, status: data.status };
+    } catch {
+        /* ignore */
+    }
+}
+
 async function finishNow() {
     if (finishing.value || !bp.value?.id) return;
     finishing.value = true;
     error.value = '';
+    progress.value = { percent: 10, message: 'Menyelesaikan generate…', status: 'generating' };
     try {
         const { data } = await http.post(`/blueprints/${bp.value.id}/finish-generate`, {}, { timeout: 120000 });
         bp.value = data.data;
+        if (data.progress) progress.value = data.progress;
+        else progress.value = { percent: 100, message: 'Selesai', status: 'ready' };
         markdown.value = '';
         stopPoll();
         message.value = data.message || 'Blueprint siap.';
@@ -104,18 +118,22 @@ function startPoll() {
     stopPoll();
     pollStartedAt = Date.now();
     finishRequested = false;
+    progress.value = { percent: 5, message: 'Memulai…', status: 'generating' };
     pollTimer = setInterval(async () => {
         try {
+            await fetchProgress();
             // Setelah 12 detik masih generating → paksa selesai via request baru (fresh PHP time).
-            if (!finishRequested && Date.now() - pollStartedAt > 12000) {
+            if (!finishRequested && Date.now() - pollStartedAt > 12000 && bp.value?.status === 'generating') {
                 finishRequested = true;
                 await finishNow();
                 return;
             }
             const { data } = await http.get(`/blueprints/${route.params.id}`);
             bp.value = data.data;
+            if (data.progress) progress.value = data.progress;
             if (data.data.status !== 'generating') {
                 markdown.value = data.markdown || '';
+                progress.value = { percent: 100, message: 'Selesai', status: data.data.status };
                 stopPoll();
                 if (data.data.status === 'ready' || data.data.status === 'scheduled') {
                     message.value = 'Blueprint panjang siap.';
@@ -126,7 +144,7 @@ function startPoll() {
         } catch {
             /* keep polling */
         }
-    }, 2500);
+    }, 1500);
 }
 
 async function load() {
@@ -137,6 +155,7 @@ async function load() {
         const { data } = await http.get(`/blueprints/${route.params.id}`);
         bp.value = data.data;
         markdown.value = data.markdown || '';
+        if (data.progress) progress.value = data.progress;
         plannedDate.value = data.data.planned_date ? String(data.data.planned_date).slice(0, 10) : '';
         plannedTime.value = data.data.planned_time ? String(data.data.planned_time).slice(0, 5) : '09:00';
         if (data.data.status === 'generating') {
@@ -205,8 +224,18 @@ onUnmounted(stopPoll);
 
 <template>
     <div class="space-y-6">
-        <div v-if="isGenerating" class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950">
-            <p>Menyusun blueprint panjang… biasanya <strong>15–40 detik</strong>. Kalau lebih dari 1 menit, klik tombol di bawah.</p>
+        <div v-if="isGenerating || finishing" class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-950">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="font-medium">{{ progress.message || 'Menyusun blueprint panjang…' }}</p>
+                <span class="text-xs font-semibold tabular-nums">{{ progress.percent || 0 }}%</span>
+            </div>
+            <div class="mt-2 h-2.5 overflow-hidden rounded-full bg-teal-100">
+                <div
+                    class="h-full rounded-full bg-teal-600 transition-all duration-500"
+                    :style="{ width: Math.min(100, Math.max(2, progress.percent || 0)) + '%' }"
+                />
+            </div>
+            <p class="mt-2 text-xs text-teal-900/80">Biasanya 15–40 detik. Kalau macet, klik selesaikan.</p>
             <button
                 type="button"
                 class="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
