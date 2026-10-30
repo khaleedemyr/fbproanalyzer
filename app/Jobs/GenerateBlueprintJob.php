@@ -30,6 +30,7 @@ class GenerateBlueprintJob
 
     public function handle(BlueprintGeneratorService $generator): void
     {
+        ignore_user_abort(true);
         @set_time_limit(600);
         @ini_set('memory_limit', '512M');
 
