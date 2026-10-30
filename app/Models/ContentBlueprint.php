@@ -12,6 +12,7 @@ class ContentBlueprint extends Model
         'brand_kit_id',
         'content_idea_id',
         'trend_signal_id',
+        'analytics_ai_analysis_id',
         'title',
         'cover_theme',
         'story_concept',
@@ -71,5 +72,10 @@ class ContentBlueprint extends Model
     public function trendSignal(): BelongsTo
     {
         return $this->belongsTo(TrendSignal::class);
+    }
+
+    public function analyticsAiAnalysis(): BelongsTo
+    {
+        return $this->belongsTo(AnalyticsAiAnalysis::class);
     }
 }

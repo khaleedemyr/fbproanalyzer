@@ -1,7 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import http from '../api/http';
 
+const router = useRouter();
 const loading = ref(true);
 const syncing = ref(false);
 const analyzing = ref(false);
@@ -11,6 +13,7 @@ const error = ref('');
 const warnings = ref([]);
 const data = ref(null);
 const ai = ref(null);
+const history = ref([]);
 const ytUrl = ref('');
 const ytTag = ref('');
 const addingYt = ref(false);
@@ -33,6 +36,18 @@ async function load() {
         error.value = e.response?.data?.message || 'Gagal memuat analytics.';
     } finally {
         loading.value = false;
+    }
+}
+
+async function loadHistory() {
+    try {
+        const res = await http.get('/analytics/ai-analyses', { params: { limit: 20 } });
+        history.value = res.data.data || [];
+        if (!ai.value && history.value.length) {
+            ai.value = history.value[0];
+        }
+    } catch {
+        /* ignore */
     }
 }
 
@@ -117,12 +132,35 @@ async function runAiAnalyze() {
     try {
         const res = await http.post('/analytics/ai-analyze', {}, { timeout: 120000 });
         ai.value = res.data.data;
-        message.value = res.data.message || 'Analisa AI siap.';
+        message.value = res.data.message || 'Analisa AI disimpan.';
+        await loadHistory();
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal analisa AI.';
     } finally {
         analyzing.value = false;
     }
+}
+
+function openAnalysis(row) {
+    ai.value = row;
+}
+
+async function removeAnalysis(id) {
+    if (!confirm('Hapus analisa ini dari history?')) return;
+    await http.delete(`/analytics/ai-analyses/${id}`);
+    if (ai.value?.id === id) ai.value = null;
+    await loadHistory();
+}
+
+function goBlueprint(topic) {
+    if (!ai.value?.id || !topic) return;
+    router.push({
+        name: 'blueprints',
+        query: {
+            topic: String(topic).slice(0, 500),
+            analysis_id: String(ai.value.id),
+        },
+    });
 }
 
 function formulaLabel(key) {
@@ -142,6 +180,7 @@ onMounted(() => {
         window.history.replaceState({}, '', window.location.pathname);
     }
     load();
+    loadHistory();
 });
 </script>
 
@@ -183,15 +222,60 @@ onMounted(() => {
         <template v-else-if="data">
             <p class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">{{ data.insight }}</p>
 
+            <section v-if="history.length" class="rounded-xl border border-slate-200 bg-white p-5">
+                <h3 class="font-semibold text-slate-900">History analisa AI</h3>
+                <p class="mt-1 text-xs text-slate-500">Klik untuk buka ulang. Bisa dipakai sebagai referensi saat buat Blueprint.</p>
+                <ul class="mt-3 divide-y divide-slate-100">
+                    <li
+                        v-for="row in history"
+                        :key="row.id"
+                        class="flex flex-wrap items-start justify-between gap-2 py-2"
+                    >
+                        <button type="button" class="min-w-0 flex-1 text-left" @click="openAnalysis(row)">
+                            <p class="truncate text-sm font-medium text-slate-900" :class="ai?.id === row.id ? 'text-teal-800' : ''">
+                                #{{ row.id }} · {{ row.title || 'Analisa' }}
+                            </p>
+                            <p class="text-xs text-slate-500">
+                                {{ row.created_at }} · {{ row.engine === 'gemini' ? 'Gemini' : 'template' }}
+                                · {{ (row.title_hooks || []).length }} hooks
+                            </p>
+                        </button>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                class="rounded border border-teal-200 px-2 py-1 text-xs font-semibold text-teal-800"
+                                @click="router.push({ name: 'blueprints', query: { analysis_id: String(row.id) } })"
+                            >
+                                Ke Blueprint
+                            </button>
+                            <button type="button" class="text-xs text-red-600" @click="removeAnalysis(row.id)">Hapus</button>
+                        </div>
+                    </li>
+                </ul>
+            </section>
+
             <section v-if="ai" class="space-y-4 rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/80 to-white p-5">
                 <div class="flex flex-wrap items-start justify-between gap-2">
                     <div>
                         <h3 class="font-semibold text-slate-900">Analisa AI — jalan ke jutaan views</h3>
-                        <p class="mt-1 text-xs text-slate-500">Engine: {{ ai.engine === 'gemini' ? 'Gemini' : 'template fallback' }}</p>
+                        <p class="mt-1 text-xs text-slate-500">
+                            #{{ ai.id || 'baru' }} · Engine: {{ ai.engine === 'gemini' ? 'Gemini' : 'template fallback' }}
+                            <span v-if="ai.created_at"> · {{ ai.created_at }}</span>
+                        </p>
                     </div>
-                    <button type="button" class="text-xs text-slate-500 underline" @click="runAiAnalyze" :disabled="analyzing">
-                        Generate ulang
-                    </button>
+                    <div class="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            class="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                            :disabled="!ai.id"
+                            @click="router.push({ name: 'blueprints', query: { analysis_id: String(ai.id) } })"
+                        >
+                            Buat Blueprint dari analisa ini
+                        </button>
+                        <button type="button" class="text-xs text-slate-500 underline" @click="runAiAnalyze" :disabled="analyzing">
+                            Generate ulang
+                        </button>
+                    </div>
                 </div>
 
                 <p class="text-sm leading-relaxed text-slate-800">{{ ai.diagnosis }}</p>
@@ -225,9 +309,17 @@ onMounted(() => {
                             </p>
                             <p class="mt-1 text-xs text-slate-500">{{ step.why }}</p>
                             <p class="mt-2 text-sm text-slate-700">{{ step.how }}</p>
-                            <p v-if="step.example_title" class="mt-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-800">
-                                Contoh judul: <strong>{{ step.example_title }}</strong>
-                            </p>
+                            <div v-if="step.example_title" class="mt-2 flex flex-wrap items-center gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-800">
+                                <span>Contoh judul: <strong>{{ step.example_title }}</strong></span>
+                                <button
+                                    type="button"
+                                    class="rounded bg-teal-700 px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                                    :disabled="!ai.id"
+                                    @click="goBlueprint(step.example_title)"
+                                >
+                                    Blueprint
+                                </button>
+                            </div>
                             <p v-if="step.expected_lift" class="mt-1 text-[11px] text-teal-800">Impact: {{ step.expected_lift }}</p>
                         </li>
                     </ol>
@@ -254,9 +346,17 @@ onMounted(() => {
                         <li
                             v-for="(h, i) in ai.title_hooks || []"
                             :key="'h'+i"
-                            class="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-800"
+                            class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-800"
                         >
-                            {{ h }}
+                            <span class="min-w-0 flex-1">{{ h }}</span>
+                            <button
+                                type="button"
+                                class="shrink-0 rounded bg-teal-700 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                                :disabled="!ai.id"
+                                @click="goBlueprint(h)"
+                            >
+                                Blueprint
+                            </button>
                         </li>
                     </ul>
                 </div>

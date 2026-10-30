@@ -2,6 +2,7 @@
 
 namespace App\Services\Blueprint;
 
+use App\Models\AnalyticsAiAnalysis;
 use App\Models\BrandKit;
 use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
@@ -58,7 +59,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null,analytics_ai_analysis?:AnalyticsAiAnalysis|null,analytics_ai_analysis_id?:int|null}  $options
      */
     public function generateFromTopic(
         User $user,
@@ -80,6 +81,15 @@ class BlueprintGeneratorService
             (string) ($options['voice_perspective'] ?? ($kit->voice_perspective ?: 'Aku'))
         );
         $plannedTime = $this->normalizePlannedTime($options['planned_time'] ?? null);
+        $analysis = $options['analytics_ai_analysis'] ?? null;
+        if (! $analysis instanceof AnalyticsAiAnalysis && ! empty($options['analytics_ai_analysis_id'])) {
+            $analysis = AnalyticsAiAnalysis::query()
+                ->where('user_id', $user->id)
+                ->find($options['analytics_ai_analysis_id']);
+        }
+        if ($analysis instanceof AnalyticsAiAnalysis && $analysis->user_id !== $user->id) {
+            $analysis = null;
+        }
 
         $this->lastEngine = 'template';
         $this->lastWarning = null;
@@ -87,7 +97,10 @@ class BlueprintGeneratorService
 
         $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
         $cleanTitle = $this->coverTitle($cleanTopic, $idea);
-        $radarContext = $this->radarContext($signal);
+        $extraContext = trim(implode("\n\n", array_filter([
+            $this->radarContext($signal),
+            $this->analyticsContext($analysis),
+        ])));
 
         // Judul yang sama (per format) tidak digenerate ulang — tema/topik tetap bebas.
         if (! $force) {
@@ -100,7 +113,7 @@ class BlueprintGeneratorService
             }
         }
 
-        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $radarContext);
+        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
@@ -158,14 +171,20 @@ class BlueprintGeneratorService
             );
         }
 
+        $storyConcept = (string) ($payload['story_concept'] ?? '');
+        if ($analysis && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'analisa ai')) {
+            $storyConcept .= "\n\n[Referensi Analisa AI #{$analysis->id}] ".$analysis->title;
+        }
+
         return ContentBlueprint::query()->create([
             'user_id' => $user->id,
             'brand_kit_id' => $kit->id,
             'content_idea_id' => $idea?->id,
             'trend_signal_id' => $signal?->id,
+            'analytics_ai_analysis_id' => $analysis?->id,
             'title' => $payload['title'],
             'cover_theme' => $payload['cover_theme'],
-            'story_concept' => $payload['story_concept'],
+            'story_concept' => $storyConcept !== '' ? $storyConcept : ($payload['story_concept'] ?? null),
             'source_topic' => $cleanTopic,
             'status' => $plannedDate ? 'scheduled' : 'ready',
             'format' => $format,
@@ -1259,6 +1278,46 @@ TXT;
         ]);
 
         return implode(' | ', $parts);
+    }
+
+    protected function analyticsContext(?AnalyticsAiAnalysis $analysis): string
+    {
+        if (! $analysis) {
+            return '';
+        }
+
+        $playbook = collect($analysis->million_view_playbook ?? [])
+            ->take(5)
+            ->map(function ($step, $i) {
+                if (! is_array($step)) {
+                    return null;
+                }
+                $n = (int) ($step['priority'] ?? ($i + 1));
+
+                return $n.'. '.trim((string) ($step['title'] ?? ''))
+                    .' — '.trim((string) ($step['how'] ?? ''))
+                    .(filled($step['example_title'] ?? null) ? ' | contoh judul: '.$step['example_title'] : '');
+            })
+            ->filter()
+            ->implode("\n");
+
+        $hooks = collect($analysis->title_hooks ?? [])->take(8)->filter()->map(fn ($h) => '- '.$h)->implode("\n");
+        $working = collect($analysis->whats_working ?? [])->take(5)->filter()->map(fn ($h) => '- '.$h)->implode("\n");
+        $blocking = collect($analysis->whats_blocking ?? [])->take(5)->filter()->map(fn ($h) => '- '.$h)->implode("\n");
+        $avoid = collect($analysis->avoid ?? [])->take(5)->filter()->map(fn ($h) => '- '.$h)->implode("\n");
+
+        $lines = array_filter([
+            'REFERENSI ANALISA AI YOUTUBE (inspirasi sudut & packaging — JANGAN dibaca mentah di VO/caption):',
+            'Diagnosis: '.Str::limit((string) $analysis->diagnosis, 400),
+            $working !== '' ? "Yang sudah jalan:\n{$working}" : null,
+            $blocking !== '' ? "Yang menghambat:\n{$blocking}" : null,
+            $playbook !== '' ? "Playbook:\n{$playbook}" : null,
+            $hooks !== '' ? "Hook/judul uji:\n{$hooks}" : null,
+            $avoid !== '' ? "Hindari:\n{$avoid}" : null,
+            'WAJIB: blueprint ini harus selaras dengan sinyal data di atas (retention/formula/emosi yang menang), bukan generic.',
+        ]);
+
+        return implode("\n", $lines);
     }
 
     protected function spokenTheme(string $title, string $fallback): string

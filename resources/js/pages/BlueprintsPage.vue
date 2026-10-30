@@ -19,6 +19,10 @@ const durationMinutes = ref(10);
 const textDurationSeconds = ref(8);
 const preferStock = ref(true);
 const voicePerspective = ref('Aku');
+const analyses = ref([]);
+const analysisId = ref('');
+
+const selectedAnalysis = computed(() => analyses.value.find((a) => String(a.id) === String(analysisId.value)) || null);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -67,6 +71,19 @@ async function load() {
     }
 }
 
+async function loadAnalyses() {
+    try {
+        const { data } = await http.get('/analytics/ai-analyses', { params: { limit: 20 } });
+        analyses.value = data.data || [];
+    } catch {
+        analyses.value = [];
+    }
+}
+
+function applyHook(hook) {
+    if (hook) topic.value = String(hook);
+}
+
 async function generate() {
     if (!topic.value.trim()) {
         error.value = 'Isi tema / ide konten dulu.';
@@ -82,6 +99,9 @@ async function generate() {
             planned_time: plannedDate.value ? (plannedTime.value || null) : null,
             format: format.value,
         };
+        if (analysisId.value) {
+            payload.analytics_ai_analysis_id = Number(analysisId.value);
+        }
         if (needsVoice.value) {
             payload.voice_perspective = voicePerspective.value || 'Aku';
         }
@@ -120,12 +140,19 @@ async function removeItem(id) {
     await load();
 }
 
-onMounted(() => {
+onMounted(async () => {
     if (route.query.topic) {
         topic.value = String(route.query.topic);
     }
     if (route.query.format && ['reels_vo', 'reels_panjang', 'reels_text', 'foto'].includes(String(route.query.format))) {
         format.value = String(route.query.format);
+    }
+    await loadAnalyses();
+    if (route.query.analysis_id) {
+        analysisId.value = String(route.query.analysis_id);
+        if (!topic.value && selectedAnalysis.value?.title_hooks?.length) {
+            topic.value = selectedAnalysis.value.title_hooks[0];
+        }
     }
     load();
 });
@@ -136,7 +163,7 @@ onMounted(() => {
         <div>
             <h2 class="text-2xl font-semibold text-slate-900">Blueprint Konten</h2>
             <p class="mt-1 text-sm text-slate-500">
-                Pilih mode: Reels VO, Panjang, Text Tempel, atau Foto. Jadwal bisa pakai tanggal + jam.
+                Pilih mode: Reels VO, Panjang, Text Tempel, atau Foto. Bisa pakai referensi Analisa AI dari Analytics.
             </p>
         </div>
 
@@ -195,6 +222,32 @@ onMounted(() => {
                 <template v-else-if="isText">Image (judul 2 baris + footer kecil “lihat caption” / like-share-follow) → i2v → caption ber-solusi + CTA.</template>
                 <template v-else>1 prompt image (judul 2 baris + footer kecil lihat caption / like-share-follow) + caption ber-solusi + CTA.</template>
             </p>
+            <div class="mt-4 space-y-2">
+                <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Referensi Analisa AI (opsional)</span>
+                    <select v-model="analysisId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">Tanpa analisa — tema bebas</option>
+                        <option v-for="a in analyses" :key="a.id" :value="String(a.id)">
+                            #{{ a.id }} · {{ a.created_at }} · {{ a.engine }} · {{ (a.title || '').slice(0, 60) }}
+                        </option>
+                    </select>
+                </label>
+                <div v-if="selectedAnalysis" class="rounded-lg border border-teal-100 bg-teal-50/60 px-3 py-2 text-xs text-teal-950">
+                    <p class="line-clamp-2">{{ selectedAnalysis.diagnosis }}</p>
+                    <div v-if="(selectedAnalysis.title_hooks || []).length" class="mt-2 flex flex-wrap gap-1">
+                        <button
+                            v-for="(h, i) in selectedAnalysis.title_hooks.slice(0, 6)"
+                            :key="i"
+                            type="button"
+                            class="rounded border border-teal-200 bg-white px-2 py-1 text-[11px] text-teal-900 hover:bg-teal-50"
+                            @click="applyHook(h)"
+                        >
+                            Pakai hook: {{ h.slice(0, 42) }}{{ h.length > 42 ? '…' : '' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <form class="mt-4 grid gap-3 md:grid-cols-[1fr_auto_auto_auto]" @submit.prevent="generate">
                 <input
                     v-model="topic"
@@ -236,6 +289,12 @@ onMounted(() => {
                         :class="bp.engine === 'gemini' ? 'bg-violet-100 text-violet-800' : 'bg-amber-100 text-amber-900'"
                     >
                         {{ bp.engine === 'gemini' ? 'AI Gemini' : 'Template' }}
+                    </span>
+                    <span
+                        v-if="bp.analytics_ai_analysis_id"
+                        class="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900"
+                    >
+                        Analisa #{{ bp.analytics_ai_analysis_id }}
                     </span>
                 </div>
                 <p class="mt-1 line-clamp-2 text-sm text-slate-600">{{ bp.story_concept }}</p>

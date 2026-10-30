@@ -2,6 +2,7 @@
 
 namespace App\Services\Analytics;
 
+use App\Models\AnalyticsAiAnalysis;
 use App\Models\AnalyticsSnapshot;
 use App\Models\BrandKit;
 use App\Models\ContentPost;
@@ -490,9 +491,22 @@ class AnalyticsTrackerService
     }
 
     /**
+     * @return \Illuminate\Support\Collection<int, AnalyticsAiAnalysis>
+     */
+    public function analysisHistory(User $user, int $limit = 30)
+    {
+        return AnalyticsAiAnalysis::query()
+            ->where('user_id', $user->id)
+            ->orderByDesc('id')
+            ->limit(max(1, min(50, $limit)))
+            ->get();
+    }
+
+    /**
      * AI playbook: how to push this channel toward millions of views.
+     * Persists each run so blueprint generation can reference history.
      *
-     * @return array{engine:string,diagnosis:string,whats_working:array<int,string>,whats_blocking:array<int,string>,million_view_playbook:array<int,array<string,mixed>>,next_7_days:array<int,string>,title_hooks:array<int,string>,avoid:array<int,string>}
+     * @return array{id:int,engine:string,title:?string,diagnosis:string,whats_working:array<int,string>,whats_blocking:array<int,string>,million_view_playbook:array<int,array<string,mixed>>,next_7_days:array<int,string>,title_hooks:array<int,string>,avoid:array<int,string>,snapshot_meta:array<string,mixed>,created_at:?string}
      */
     public function aiViralAnalysis(User $user): array
     {
@@ -600,11 +614,38 @@ Bahasa Indonesia, langsung, tanpa basa-basi motivational.
 PROMPT;
 
         $ai = $this->callGeminiViralJson($prompt);
-        if ($ai !== null) {
-            return $ai + ['engine' => 'gemini'];
+        if ($ai === null) {
+            $ai = $this->fallbackViralAnalysis($dashboard, $top, $highRet);
+            $ai['engine'] = 'template';
+        } else {
+            $ai['engine'] = 'gemini';
         }
 
-        return $this->fallbackViralAnalysis($dashboard, $top, $highRet) + ['engine' => 'template'];
+        $meta = [
+            'total_views' => (int) ($summary['total_views'] ?? 0),
+            'youtube_tracked' => (int) ($summary['youtube_tracked'] ?? 0),
+            'avg_retention' => (float) ($summary['avg_retention'] ?? 0),
+            'avg_viral_score' => (float) ($summary['avg_viral_score'] ?? 0),
+            'insight' => (string) ($dashboard['insight'] ?? ''),
+            'channel' => $channel,
+            'top_formulas' => collect($dashboard['winning_formulas'] ?? [])->take(5)->values()->all(),
+        ];
+
+        $row = AnalyticsAiAnalysis::query()->create([
+            'user_id' => $user->id,
+            'engine' => $ai['engine'],
+            'title' => AnalyticsAiAnalysis::makeTitleFromDiagnosis($ai['diagnosis'] ?? null, $ai['engine']),
+            'diagnosis' => $ai['diagnosis'] ?? null,
+            'whats_working' => $ai['whats_working'] ?? [],
+            'whats_blocking' => $ai['whats_blocking'] ?? [],
+            'million_view_playbook' => $ai['million_view_playbook'] ?? [],
+            'next_7_days' => $ai['next_7_days'] ?? [],
+            'title_hooks' => $ai['title_hooks'] ?? [],
+            'avoid' => $ai['avoid'] ?? [],
+            'snapshot_meta' => $meta,
+        ]);
+
+        return $row->toAnalysisArray();
     }
 
     /**

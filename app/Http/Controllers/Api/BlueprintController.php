@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AnalyticsAiAnalysis;
 use App\Models\BrandKit;
 use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
@@ -19,7 +20,10 @@ class BlueprintController extends Controller
     {
         $query = ContentBlueprint::query()
             ->where('user_id', $request->user()->id)
-            ->with(['brandKit:id,name,character_name'])
+            ->with([
+                'brandKit:id,name,character_name',
+                'analyticsAiAnalysis:id,title,engine,created_at',
+            ])
             ->orderByDesc('updated_at');
 
         if ($request->filled('status')) {
@@ -46,7 +50,7 @@ class BlueprintController extends Controller
     {
         abort_unless($blueprint->user_id === $request->user()->id, 403);
 
-        $blueprint->load(['brandKit', 'contentIdea', 'trendSignal']);
+        $blueprint->load(['brandKit', 'contentIdea', 'trendSignal', 'analyticsAiAnalysis']);
 
         return response()->json([
             'data' => $blueprint,
@@ -73,12 +77,20 @@ class BlueprintController extends Controller
             'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
+            'analytics_ai_analysis_id' => ['nullable', 'exists:analytics_ai_analyses,id'],
         ]);
 
         $user = $request->user();
         $planned = $data['planned_date'] ?? null;
         $format = $data['format'] ?? BlueprintGeneratorService::FORMAT_REELS_VO;
         $force = (bool) ($data['force'] ?? false);
+
+        $analysis = null;
+        if (! empty($data['analytics_ai_analysis_id'])) {
+            $analysis = AnalyticsAiAnalysis::query()->findOrFail($data['analytics_ai_analysis_id']);
+            abort_unless($analysis->user_id === $user->id, 403);
+        }
+
         $options = array_filter([
             'duration_seconds' => $data['duration_seconds'] ?? null,
             'duration_minutes' => $data['duration_minutes'] ?? null,
@@ -86,6 +98,7 @@ class BlueprintController extends Controller
             'voice_perspective' => $data['voice_perspective'] ?? null,
             'planned_time' => $data['planned_time'] ?? null,
             'force' => $force,
+            'analytics_ai_analysis' => $analysis,
         ], fn ($v) => $v !== null);
 
         if (! empty($data['content_idea_id'])) {
@@ -100,7 +113,7 @@ class BlueprintController extends Controller
             $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format, $force, $options);
         }
 
-        $bp->load('brandKit');
+        $bp->load(['brandKit', 'analyticsAiAnalysis']);
 
         $duplicate = $generator->wasDuplicate();
         $engine = $generator->lastEngine();

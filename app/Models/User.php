@@ -66,6 +66,11 @@ class User extends Authenticatable
         return $this->hasMany(AnalyticsSnapshot::class);
     }
 
+    public function analyticsAiAnalyses(): HasMany
+    {
+        return $this->hasMany(AnalyticsAiAnalysis::class);
+    }
+
     public function trackedYoutubeVideos(): HasMany
     {
         return $this->hasMany(TrackedYoutubeVideo::class);

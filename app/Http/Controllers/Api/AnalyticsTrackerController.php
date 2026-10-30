@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AnalyticsAiAnalysis;
 use App\Models\TrackedYoutubeVideo;
 use App\Services\Analytics\AnalyticsTrackerService;
 use Illuminate\Http\JsonResponse;
@@ -80,10 +81,34 @@ class AnalyticsTrackerController extends Controller
 
         return response()->json([
             'message' => ($analysis['engine'] ?? '') === 'gemini'
-                ? 'Analisa AI (Gemini) siap.'
-                : 'Analisa template siap (Gemini tidak tersedia — cek GEMINI_API_KEY).',
+                ? 'Analisa AI (Gemini) disimpan ke history.'
+                : 'Analisa template disimpan (Gemini tidak tersedia — cek GEMINI_API_KEY).',
             'data' => $analysis,
+        ], 201);
+    }
+
+    public function aiHistory(Request $request, AnalyticsTrackerService $tracker): JsonResponse
+    {
+        $rows = $tracker->analysisHistory($request->user(), (int) $request->integer('limit', 20));
+
+        return response()->json([
+            'data' => $rows->map(fn (AnalyticsAiAnalysis $row) => $row->toAnalysisArray())->values(),
         ]);
+    }
+
+    public function aiShow(Request $request, AnalyticsAiAnalysis $analyticsAiAnalysis): JsonResponse
+    {
+        abort_unless($analyticsAiAnalysis->user_id === $request->user()->id, 403);
+
+        return response()->json(['data' => $analyticsAiAnalysis->toAnalysisArray()]);
+    }
+
+    public function aiDestroy(Request $request, AnalyticsAiAnalysis $analyticsAiAnalysis): JsonResponse
+    {
+        abort_unless($analyticsAiAnalysis->user_id === $request->user()->id, 403);
+        $analyticsAiAnalysis->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     public function trackYoutube(Request $request, AnalyticsTrackerService $tracker): JsonResponse

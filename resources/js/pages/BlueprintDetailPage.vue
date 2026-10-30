@@ -153,6 +153,12 @@ onMounted(load);
                     <span v-if="bp.prefer_stock" class="rounded bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-800">
                         Utama stock
                     </span>
+                    <span
+                        v-if="bp.analytics_ai_analysis_id"
+                        class="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900"
+                    >
+                        Ref Analisa AI #{{ bp.analytics_ai_analysis_id }}
+                    </span>
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>

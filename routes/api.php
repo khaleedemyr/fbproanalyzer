@@ -60,6 +60,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('analytics', [AnalyticsTrackerController::class, 'index']);
     Route::post('analytics/sync', [AnalyticsTrackerController::class, 'sync']);
     Route::post('analytics/ai-analyze', [AnalyticsTrackerController::class, 'aiAnalyze']);
+    Route::get('analytics/ai-analyses', [AnalyticsTrackerController::class, 'aiHistory']);
+    Route::get('analytics/ai-analyses/{analyticsAiAnalysis}', [AnalyticsTrackerController::class, 'aiShow']);
+    Route::delete('analytics/ai-analyses/{analyticsAiAnalysis}', [AnalyticsTrackerController::class, 'aiDestroy']);
     Route::post('analytics/youtube', [AnalyticsTrackerController::class, 'trackYoutube']);
     Route::delete('analytics/youtube/{trackedYoutubeVideo}', [AnalyticsTrackerController::class, 'destroyYoutube']);
 
