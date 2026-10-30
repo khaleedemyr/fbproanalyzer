@@ -750,7 +750,7 @@ class BlueprintGeneratorService
             $section = $scene['section'] ?? null;
             if ($section && $section !== $currentSection) {
                 $currentSection = $section;
-                $lines[] = '—— '.$currentSection.' ——';
+                $lines[] = '—— '.Str::upper($currentSection).' ——';
                 $lines[] = '';
             }
             $lines[] = ($scene['timecode'] ?? '').' | '.($scene['image_prompt'] ?? '');
@@ -1064,6 +1064,7 @@ PROMPT;
             : 'UTAMAKAN visual_type "ai" ilustrasi buku. Bumper hanya antar bab.';
         $banned = $this->bannedHookPhrasesForPrompt();
         $bookStyle = $this->bookIllustrationStyleGuide();
+        $voWords = $this->targetVoWords();
 
         return <<<PROMPT
 Kamu menulis KERANGKA RINGKAS VOD psikologi untuk "{$kit->name}" (~{$minutes} mnt).
@@ -1071,10 +1072,11 @@ Beat visual {$visualBeat}s · naskah {$voBeat}s · sistem expand ke ~{$fullBeats
 {$preferStock}
 
 WAJIB: tepat {$beatCount} scene SAJA. JSON harus lengkap & valid (jangan potong di tengah).
-Field pendek:
-- vo: 1 kalimat saja
-- on_screen: max 6 kata
-- image_prompt: 1 kalimat metafora buku (bukan paragraf)
+Field:
+- section: wajib bertitel, contoh "GOLDEN HOOK: Jebakan Empati", "BAB 1: Frame Control", "BAB 2: ...", "BAB 3: ...", "PENUTUP: Aturan Baru", "BUMPER"
+- vo: 1–2 kalimat, {$voWords['min']}-{$voWords['max']} kata (sesuai beat {$voBeat}s — jangan terlalu pendek, nanti VO kosong)
+- on_screen: max 6 kata (judul singkat bab/beat)
+- image_prompt: 1 kalimat metafora buku
 - motion_prompt: "slow Ken Burns"
 
 Style image: {$bookStyle}
@@ -1096,8 +1098,114 @@ DILARANG pembuka:
 
 JSON SAJA keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 Setiap scene: section, timecode, visual_type, vo, on_screen, image_prompt, motion_prompt.
-Bumper vo "". Scene lain vo terisi. caption WAJIB. JANGAN markdown.
+Bumper vo "". Scene lain vo terisi {$voWords['min']}+ kata. caption WAJIB. JANGAN markdown.
 PROMPT;
+    }
+
+    /**
+     * Target kata VO per beat naskah (~2.3 kata/detik, bicara jelas).
+     *
+     * @return array{min:int,ideal:int,max:int}
+     */
+    protected function targetVoWords(?int $voBeatSeconds = null): array
+    {
+        $sec = max(3, $voBeatSeconds ?? $this->voBeatSeconds);
+        $ideal = (int) round($sec * 2.3);
+        $ideal = max(8, min(48, $ideal));
+
+        return [
+            'min' => max(6, $ideal - 4),
+            'ideal' => $ideal,
+            'max' => min(56, $ideal + 6),
+        ];
+    }
+
+    /**
+     * Sesuaikan panjang naskah ke beat (hindari VO pendek di beat 10s).
+     */
+    protected function fitVoToBeat(string $vo, string $topic, string $section = ''): string
+    {
+        $vo = trim(preg_replace('/\s+/u', ' ', $vo) ?? $vo);
+        if ($vo === '') {
+            $vo = $this->sectionSeedLine($section !== '' ? $section : 'BAB', $topic, $topic);
+        }
+
+        $t = $this->targetVoWords();
+        $words = preg_split('/\s+/u', $vo) ?: [];
+        $count = count($words);
+        $vp = $this->voicePerspective;
+
+        if ($count < $t['min']) {
+            $fillers = [
+                "Ini pola yang sering {$vp} alami soal {$topic} tanpa sadar.",
+                "Perhatikan detailnya pelan-pelan supaya bingkai tidak digeser diam-diam.",
+                "Jangan buru-buru bereaksi; amati dulu siapa yang diuntungkan dari rasa iba {$vp}.",
+                "Kalau dilewatkan, {$vp} bisa kehilangan kendali percakapan dalam hitungan detik.",
+                "Simpan insight ini, karena lapisan berikutnya masih satu cerita yang sama.",
+            ];
+            $i = 0;
+            while (count($words) < $t['min'] && $i < 12) {
+                $extra = $fillers[$i % count($fillers)];
+                $vo = rtrim($vo, " \t.").'. '.$extra;
+                $words = preg_split('/\s+/u', $vo) ?: [];
+                $i++;
+            }
+        }
+
+        if (count($words) > $t['max']) {
+            $cut = array_slice($words, 0, $t['max']);
+            $vo = implode(' ', $cut);
+            if (! preg_match('/[.!?…]$/u', $vo)) {
+                $vo .= '.';
+            }
+        }
+
+        return trim($vo);
+    }
+
+    /**
+     * Judul bab dari on_screen / VO / default.
+     */
+    protected function makeChapterTitle(
+        string $sectionKey,
+        array $voLines,
+        string $onScreen,
+        string $topic,
+    ): string {
+        $key = $this->normalizeLongFormSection($sectionKey);
+        if ($key === 'BUMPER') {
+            return 'BUMPER';
+        }
+
+        $title = trim($onScreen);
+        // Kalau section sudah "BAB 1: Judul", ambil judulnya.
+        if (str_contains($sectionKey, ':')) {
+            $parts = explode(':', $sectionKey, 2);
+            $maybe = trim($parts[1] ?? '');
+            if ($maybe !== '' && ! preg_match('/^BAB\s*\d+$/i', $maybe)) {
+                $title = $maybe;
+            }
+        }
+
+        if ($title === '' || mb_strlen($title) < 4 || preg_match('/^(GOLDEN HOOK|BAB\s*\d+|PENUTUP|BUMPER)$/iu', $title)) {
+            $firstVo = trim((string) ($voLines[0] ?? ''));
+            $title = $this->onScreenFromVo($firstVo, '', $topic, false);
+        }
+
+        if ($title === '' || mb_strlen($title) < 3) {
+            $title = match (true) {
+                str_contains($key, 'HOOK') => 'Cerita Pembuka',
+                str_contains($key, 'BAB 1') => 'Pola Dasar',
+                str_contains($key, 'BAB 2') => 'Cara Kerja Manipulasi',
+                str_contains($key, 'BAB 3') => 'Cara Merebut Bingkai',
+                str_contains($key, 'PENUTUP') => 'Aturan Baru',
+                default => Str::limit($topic, 28, ''),
+            };
+        }
+
+        $title = Str::title(Str::lower(Str::limit($title, 42, '')));
+
+        return $key.': '.$title;
     }
 
     /**
@@ -2189,13 +2297,15 @@ TXT;
             $beatsHere = max(1, (int) ($alloc[$i] ?? 1));
             $linesNeeded = min(36, max(count($segments[$i]['vo_lines'] ?? []), $beatsHere, 2));
             $spineNeed = min(8, max(3, count($segments[$i]['vo_lines'] ?? []) + 2));
+            $sectionKey = (string) ($segments[$i]['section_key'] ?? $this->normalizeLongFormSection((string) ($segments[$i]['section'] ?? 'BAB')));
             $expandJobs[$i] = [
                 'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
+                'section_key' => $sectionKey,
                 'need' => $linesNeeded,
                 'seed' => $segments[$i]['vo_lines'] ?? [],
             ];
             $spineJobs[$i] = [
-                'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
+                'section' => $sectionKey,
                 'need' => $spineNeed,
                 'seed' => $segments[$i]['vo_lines'] ?? [],
             ];
@@ -2206,11 +2316,12 @@ TXT;
         $this->reportProgress(82, 'Melengkapi naskah per beat…');
         $batchNorm = [];
         foreach ($batch as $k => $lines) {
+            $batchNorm[$this->normalizeLongFormSection((string) $k)] = $lines;
             $batchNorm[Str::upper(trim((string) $k))] = $lines;
         }
         foreach ($expandJobs as $i => $job) {
-            $key = Str::upper(trim($job['section']));
-            $fromBatch = $batchNorm[$key] ?? null;
+            $key = (string) ($job['section_key'] ?? $this->normalizeLongFormSection($job['section']));
+            $fromBatch = $batchNorm[$key] ?? $batchNorm[Str::upper($key)] ?? null;
             $seed = is_array($fromBatch) && $fromBatch !== []
                 ? $fromBatch
                 : ($job['seed'] ?? []);
@@ -2266,12 +2377,17 @@ TXT;
                 $lineIdx = $voCount >= $beatsHere
                     ? $b
                     : (int) min($voCount - 1, intdiv($b * $voCount, max(1, $beatsHere)));
-                $vo = trim((string) ($voLines[$lineIdx] ?? ''));
+                $vo = $this->fitVoToBeat(
+                    trim((string) ($voLines[$lineIdx] ?? '')),
+                    $topic,
+                    $section
+                );
                 $on = $this->onScreenFromVo($vo, $onSeed, $coverTheme, $lineIdx === 0);
                 $localPlate = intdiv($b * $voBeat, $visualBeat);
 
                 $out[] = [
                     'section' => $section,
+                    'chapter_title' => $section,
                     'timecode' => $this->formatTimecode($start, $end),
                     'visual_type' => 'ai',
                     'image_prompt' => '',
@@ -2455,6 +2571,7 @@ TXT;
 
             $vo = trim((string) ($s['vo'] ?? ''));
             $on = trim((string) ($s['on_screen'] ?? ''));
+            $rawSection = (string) ($s['section'] ?? '');
             $last = $buckets !== [] ? count($buckets) - 1 : -1;
             if ($last >= 0
                 && ($buckets[$last]['kind'] ?? '') === 'content'
@@ -2466,10 +2583,14 @@ TXT;
                 if ($on !== '' && ($buckets[$last]['on_screen'] ?? '') === '') {
                     $buckets[$last]['on_screen'] = $on;
                 }
+                if (($buckets[$last]['raw_section'] ?? '') === '' && $rawSection !== '') {
+                    $buckets[$last]['raw_section'] = $rawSection;
+                }
             } else {
                 $buckets[] = [
                     'kind' => 'content',
                     'section' => $section,
+                    'raw_section' => $rawSection,
                     'vo_lines' => $vo !== '' ? [$vo] : [],
                     'on_screen' => $on,
                 ];
@@ -2522,12 +2643,20 @@ TXT;
             $seg = $bySection[$key];
             $flat = $this->splitVoLinesOnly($seg['vo_lines'] ?? []);
             $seg['vo_lines'] = $flat !== [] ? $flat : ["Bagian {$key}: {$topic}."];
+            $seg['section'] = $this->makeChapterTitle(
+                (string) ($seg['raw_section'] ?? $key),
+                $seg['vo_lines'],
+                (string) ($seg['on_screen'] ?? ''),
+                $topic
+            );
+            $seg['section_key'] = $key;
 
             // Bumper antar bab (setelah hook/bab, sebelum bab berikutnya / penutup).
             if ($prevContent !== null && $prevContent !== 'PENUTUP') {
                 $segments[] = [
                     'kind' => 'bumper',
                     'section' => 'BUMPER',
+                    'section_key' => 'BUMPER',
                     'vo_lines' => [],
                     'on_screen' => 'KEA ABBASY',
                 ];
@@ -2620,6 +2749,10 @@ TXT;
         }
         $s = Str::upper(trim($raw));
         $s = preg_replace('/\s+/', ' ', $s) ?? $s;
+        // "BAB 1: JUDUL" → pakai bagian sebelum colon untuk key
+        if (str_contains($s, ':')) {
+            $s = trim(explode(':', $s, 2)[0]);
+        }
         if ($s === '' || $s === 'BLUEPRINT') {
             return 'BAB 1';
         }
@@ -2663,7 +2796,7 @@ TXT;
 
         $weights = [];
         foreach ($contentIdx as $i) {
-            $sec = Str::upper((string) ($segments[$i]['section'] ?? ''));
+            $sec = Str::upper((string) ($segments[$i]['section_key'] ?? $segments[$i]['section'] ?? ''));
             $weights[$i] = match (true) {
                 str_contains($sec, 'HOOK') => 18,
                 str_contains($sec, 'BAB 1') => 24,
@@ -2820,6 +2953,10 @@ TXT;
 
         $model = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
         $vp = $this->voicePerspective;
+        $voWords = $this->targetVoWords();
+        $voMin = $voWords['min'];
+        $voMax = $voWords['max'];
+        $voBeatSec = $this->voBeatSeconds;
         $blocks = [];
         foreach ($jobs as $job) {
             $seed = $this->splitVoLinesOnly($job['seed'] ?? []);
@@ -2839,7 +2976,8 @@ Cover: {$coverTheme}
 {$blockText}
 
 Tulis SPINE pendek per bagian (bukan naskah penuh). Kalimat nyambung antar bab.
-DILARANG template "Latihan/Poin/Catatan N". Tiap kalimat 8–18 kata.
+DILARANG template "Latihan/Poin/Catatan N".
+Tiap kalimat {$voMin}-{$voMax} kata (sesuai beat naskah {$voBeatSec}s).
 
 JSON SAJA:
 {"sections":{"GOLDEN HOOK":["..."],"BAB 1":["..."],"BAB 2":["..."],"BAB 3":["..."],"PENUTUP":["..."]}}
@@ -2961,18 +3099,26 @@ PROMPT;
             // Bridge selalu mengacu ke kalimat sebelumnya / anchor, bukan lompat topik.
             $line = match ($i % 3) {
                 0 => $b,
-                1 => 'Setelah "'.Str::limit($this->voFingerprint($prev), 42).'", '.$vp.' wajib cek siapa yang menang.',
-                default => Str::limit($anchor, 90).(str_ends_with(rtrim($anchor), '.') ? '' : '.').' Itu pintu ke lapisan berikutnya.',
+                1 => 'Setelah "'.Str::limit($this->voFingerprint($prev), 42).'", '.$vp.' wajib cek siapa yang menang soal '.$topic.'.',
+                default => Str::limit($anchor, 90).(str_ends_with(rtrim($anchor), '.') ? '' : '.').' Itu pintu ke lapisan berikutnya tentang '.$topic.'.',
             };
+            $line = $this->fitVoToBeat($line, $topic, $section);
             if (! $this->voTooSimilarToAny($line, $out) && ! $this->looksLikeMetaVo($line)) {
                 $out[] = $line;
             } else {
-                $out[] = "Lanjut benang {$section}: {$vp} uji satu situasi nyata soal {$topic} hari ini.";
+                $out[] = $this->fitVoToBeat(
+                    "Lanjut benang {$section}: {$vp} uji satu situasi nyata soal {$topic} hari ini supaya polanya kebaca.",
+                    $topic,
+                    $section
+                );
             }
             $i++;
         }
 
-        return array_slice($out, 0, $need);
+        return array_map(
+            fn ($line) => $this->fitVoToBeat((string) $line, $topic, $section),
+            array_slice($out, 0, $need)
+        );
     }
 
     protected function looksLikeMetaVo(string $line): bool

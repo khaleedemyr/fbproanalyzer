@@ -505,7 +505,12 @@ onUnmounted(stopPoll);
             <!-- Mode VO / Panjang -->
             <template v-else>
                 <div v-for="group in groupedScenes" :key="group.name" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ group.name }}</h3>
+                    <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 pb-2">
+                        <h3 class="text-base font-semibold text-slate-900">{{ group.name }}</h3>
+                        <p v-if="isLong && group.name !== 'BUMPER'" class="text-[11px] text-slate-500">
+                            Target naskah ~{{ Math.round((Number(voBeatSeconds) || 5) * 2.3) }} kata / beat {{ voBeatSeconds }}s
+                        </p>
+                    </div>
                     <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                             <h4 class="font-semibold text-slate-900">
