@@ -32,6 +32,7 @@ const formatLabel = computed(() => ({
 const isAi = computed(() => bp.value?.engine === 'gemini');
 const engineLabel = computed(() => (isAi.value ? 'Generate AI (Gemini)' : 'Template Blueprint'));
 const beatSeconds = computed(() => bp.value?.beat_seconds || 5);
+const voBeatSeconds = computed(() => bp.value?.vo_beat_seconds || beatSeconds.value);
 const durationLabel = computed(() => {
     const s = Number(bp.value?.duration_seconds) || 0;
     if (!s) return '';
@@ -42,7 +43,7 @@ const durationLabel = computed(() => {
 });
 
 function sceneDurationLabel(scene) {
-    const beat = scene?.beat_seconds || beatSeconds.value;
+    const beat = scene?.beat_seconds || (isLong.value ? voBeatSeconds.value : beatSeconds.value);
     if (!beat) return 'foto';
     return `${beat} detik`;
 }
@@ -145,6 +146,7 @@ onMounted(load);
                     </span>
                     <span v-if="durationLabel" class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
                         <template v-if="isText">i2v {{ durationLabel }}</template>
+                        <template v-else-if="isLong">{{ durationLabel }} · visual {{ beatSeconds }}s · naskah {{ voBeatSeconds }}s</template>
                         <template v-else>{{ durationLabel }} · beat {{ beatSeconds }} dtk</template>
                     </span>
                     <span v-if="!isVisual" class="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-800">
@@ -169,7 +171,10 @@ onMounted(load);
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
                 <p v-if="bp && !isVisual" class="mt-1 text-xs text-slate-500">
-                    Naskah: {{ durationLabel || '-' }} total · tiap beat {{ beatSeconds }} detik · sudut pandang “{{ bp.voice_perspective || 'Aku' }}”
+                    Naskah: {{ durationLabel || '-' }} total ·
+                    <template v-if="isLong">visual tiap {{ beatSeconds }}s · naskah tiap {{ voBeatSeconds }}s</template>
+                    <template v-else>tiap beat {{ beatSeconds }} detik</template>
+                    · sudut pandang “{{ bp.voice_perspective || 'Aku' }}”
                 </p>
                 <p v-else-if="bp && isText" class="mt-1 text-xs text-slate-500">
                     Judul 2 baris + footer kecil “lihat caption / like·share·follow” · i2v {{ durationLabel }} · caption + CTA

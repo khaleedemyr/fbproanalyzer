@@ -17,6 +17,8 @@ const format = ref('reels_vo');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
 const textDurationSeconds = ref(8);
+const visualBeatSeconds = ref(10);
+const voBeatSeconds = ref(5);
 const preferStock = ref(false);
 const voicePerspective = ref('Aku');
 const analyses = ref([]);
@@ -32,9 +34,17 @@ const formatLabel = {
 };
 
 const voDurationOptions = [10, 15, 20, 30, 45, 60];
-const longDurationOptions = [5, 8, 10, 12, 15];
+const longDurationOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+const visualBeatOptions = [5, 10, 15, 20, 30];
+const voBeatOptions = [3, 5, 8, 10, 15];
 const textDurationOptions = [5, 6, 8, 10, 12, 15];
 const voiceOptions = ['Aku', 'Saya', 'Gue', 'Kamu', 'Kita', 'Dia', 'Orang ketiga'];
+
+function longBeatEstimate(secondsPerBeat) {
+    const sec = Number(durationMinutes.value) * 60;
+    const beat = Number(secondsPerBeat) || 1;
+    return Math.max(1, Math.round(sec / beat));
+}
 
 const isVo = computed(() => format.value === 'reels_vo');
 const isLong = computed(() => format.value === 'reels_panjang');
@@ -107,13 +117,15 @@ async function generate() {
         }
         if (isLong.value) {
             payload.duration_minutes = Number(durationMinutes.value);
+            payload.visual_beat_seconds = Number(visualBeatSeconds.value);
+            payload.vo_beat_seconds = Number(voBeatSeconds.value);
             payload.prefer_stock = !!preferStock.value;
         } else if (isText.value) {
             payload.duration_seconds = Number(textDurationSeconds.value);
         } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
         }
-        const { data } = await http.post('/blueprints/generate', payload);
+        const { data } = await http.post('/blueprints/generate', payload, { timeout: 300000 });
         message.value = data.duplicate
             ? `${data.message} Judul: "${data.data?.cover_theme || data.data?.title}".`
             : data.message;
@@ -195,7 +207,19 @@ onMounted(async () => {
                 <label v-else-if="isLong" class="text-sm">
                     <span class="mb-1 block text-xs font-semibold text-slate-500">Durasi (menit)</span>
                     <select v-model.number="durationMinutes" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                        <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} menit · ~{{ (m * 60) / 5 }} beat</option>
+                        <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} menit</option>
+                    </select>
+                </label>
+                <label v-if="isLong" class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Beat visual (ganti gambar)</span>
+                    <select v-model.number="visualBeatSeconds" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="s in visualBeatOptions" :key="s" :value="s">tiap {{ s }} dtk · ~{{ longBeatEstimate(s) }} plate</option>
+                    </select>
+                </label>
+                <label v-if="isLong" class="text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Beat naskah (VO)</span>
+                    <select v-model.number="voBeatSeconds" class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="s in voBeatOptions" :key="s" :value="s">tiap {{ s }} dtk · ~{{ longBeatEstimate(s) }} baris</option>
                     </select>
                 </label>
                 <label v-else-if="isText" class="text-sm">
@@ -218,7 +242,7 @@ onMounted(async () => {
 
             <p class="mt-2 text-xs text-slate-500">
                 <template v-if="isVo">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
-                <template v-else-if="isLong">Golden Hook → Bab → Penutup · beat 5 dtk · rangkaian ilustrasi bergaya buku yang nyambung naskah (bukan stickman).</template>
+                <template v-else-if="isLong">Golden Hook → Bab → Penutup · visual & naskah terpisah · ilustrasi bergaya buku (bukan stickman). Durasi panjang (>~12 mnt @5s) pakai expand template.</template>
                 <template v-else-if="isText">Image (judul 2 baris + footer kecil “lihat caption” / like-share-follow) → i2v → caption ber-solusi + CTA.</template>
                 <template v-else>1 prompt image (judul 2 baris + footer kecil lihat caption / like-share-follow) + caption ber-solusi + CTA.</template>
             </p>
@@ -304,7 +328,13 @@ onMounted(async () => {
                     <template v-else-if="bp.format === 'reels_text'"> · i2v {{ durationLabel(bp.duration_seconds) }}</template>
                     <template v-else>
                         · {{ durationLabel(bp.duration_seconds) }}
-                        · beat {{ bp.beat_seconds || 5 }} dtk
+                        <template v-if="bp.format === 'reels_panjang'">
+                            · visual {{ bp.beat_seconds || 10 }}s
+                            · naskah {{ bp.vo_beat_seconds || bp.beat_seconds || 5 }}s
+                        </template>
+                        <template v-else>
+                            · beat {{ bp.beat_seconds || 5 }} dtk
+                        </template>
                         · sudut {{ bp.voice_perspective || 'Aku' }}
                         · {{ (bp.scenes || []).length }} scene
                     </template>

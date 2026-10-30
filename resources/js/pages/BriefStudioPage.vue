@@ -18,6 +18,8 @@ const voicePerspective = ref('Aku');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
 const textDurationSeconds = ref(8);
+const visualBeatSeconds = ref(10);
+const voBeatSeconds = ref(5);
 const preferStock = ref(false);
 
 const formatLabel = {
@@ -28,8 +30,16 @@ const formatLabel = {
 };
 
 const voDurationOptions = [10, 15, 20, 30, 45, 60];
-const longDurationOptions = [5, 8, 10, 12, 15];
+const longDurationOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+const visualBeatOptions = [5, 10, 15, 20, 30];
+const voBeatOptions = [3, 5, 8, 10, 15];
 const textDurationOptions = [5, 6, 8, 10, 12, 15];
+
+function longBeatEstimate(secondsPerBeat) {
+    const sec = Number(durationMinutes.value) * 60;
+    const beat = Number(secondsPerBeat) || 1;
+    return Math.max(1, Math.round(sec / beat));
+}
 
 const isVo = computed(() => format.value === 'reels_vo');
 const isLong = computed(() => format.value === 'reels_panjang');
@@ -121,6 +131,8 @@ async function makeBlueprint() {
         }
         if (isLong.value) {
             payload.duration_minutes = Number(durationMinutes.value);
+            payload.visual_beat_seconds = Number(visualBeatSeconds.value);
+            payload.vo_beat_seconds = Number(voBeatSeconds.value);
             payload.prefer_stock = !!preferStock.value;
         } else if (isText.value) {
             payload.duration_seconds = Number(textDurationSeconds.value);
@@ -131,7 +143,7 @@ async function makeBlueprint() {
         const { data } = await http.post(
             `/brief-studio/${brief.value.id}/blueprint`,
             payload,
-            { timeout: 180000 }
+            { timeout: 300000 }
         );
         message.value = data.message;
         brief.value = data.brief || brief.value;
@@ -281,7 +293,19 @@ onMounted(async () => {
                     <label v-else-if="isLong" class="text-sm">
                         <span class="mb-1 block text-[11px] font-semibold text-slate-500">Durasi (menit)</span>
                         <select v-model.number="durationMinutes" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
-                            <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} mnt · ~{{ (m * 60) / 5 }} beat</option>
+                            <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} mnt</option>
+                        </select>
+                    </label>
+                    <label v-if="isLong" class="text-sm">
+                        <span class="mb-1 block text-[11px] font-semibold text-slate-500">Beat visual</span>
+                        <select v-model.number="visualBeatSeconds" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                            <option v-for="s in visualBeatOptions" :key="s" :value="s">{{ s }}s · ~{{ longBeatEstimate(s) }} plate</option>
+                        </select>
+                    </label>
+                    <label v-if="isLong" class="text-sm">
+                        <span class="mb-1 block text-[11px] font-semibold text-slate-500">Beat naskah</span>
+                        <select v-model.number="voBeatSeconds" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                            <option v-for="s in voBeatOptions" :key="s" :value="s">{{ s }}s · ~{{ longBeatEstimate(s) }} baris</option>
                         </select>
                     </label>
                     <label v-else-if="isText" class="text-sm">

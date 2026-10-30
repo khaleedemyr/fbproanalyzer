@@ -132,7 +132,7 @@ class BriefStudioService
     }
 
     /**
-     * @param  array{format?:string|null,planned_date?:string|null,planned_time?:string|null,duration_seconds?:int|null,duration_minutes?:int|null,prefer_stock?:bool|null,voice_perspective?:string|null,force?:bool}  $options
+     * @param  array{format?:string|null,planned_date?:string|null,planned_time?:string|null,duration_seconds?:int|null,duration_minutes?:int|null,visual_beat_seconds?:int|null,vo_beat_seconds?:int|null,beat_seconds?:int|null,prefer_stock?:bool|null,voice_perspective?:string|null,force?:bool}  $options
      */
     public function generateBlueprint(User $user, ContentBrief $brief, array $options = []): ContentBlueprint
     {
@@ -155,9 +155,13 @@ class BriefStudioService
             ? TrendSignal::query()->find($primarySignalId)
             : null;
 
+        $visualBeat = $options['visual_beat_seconds'] ?? $options['beat_seconds'] ?? null;
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,
             'duration_minutes' => $options['duration_minutes'] ?? null,
+            'visual_beat_seconds' => $visualBeat,
+            'vo_beat_seconds' => $options['vo_beat_seconds'] ?? null,
+            'beat_seconds' => $visualBeat,
             'prefer_stock' => array_key_exists('prefer_stock', $options) ? (bool) $options['prefer_stock'] : null,
             'voice_perspective' => $options['voice_perspective'] ?? null,
             'planned_time' => $options['planned_time'] ?? null,

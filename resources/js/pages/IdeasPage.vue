@@ -76,9 +76,11 @@ async function makeBlueprint(idea, format = 'reels_vo') {
             payload.voice_perspective = voice.trim() || 'Aku';
         }
         if (format === 'reels_panjang') {
-            const minutes = Number(prompt('Durasi video panjang (menit)? 5–15', '10') || '10');
-            payload.duration_minutes = Math.min(20, Math.max(3, minutes || 10));
-            payload.prefer_stock = true;
+            const minutes = Number(prompt('Durasi video panjang (menit)? 5–60 (kelipatan 5)', '10') || '10');
+            payload.duration_minutes = Math.min(60, Math.max(5, Math.round((minutes || 10) / 5) * 5));
+            payload.visual_beat_seconds = 10;
+            payload.vo_beat_seconds = 5;
+            payload.prefer_stock = false;
         } else if (format === 'reels_text') {
             const seconds = Number(prompt('Durasi image→video (detik)? 5–15', '8') || '8');
             payload.duration_seconds = Math.min(30, Math.max(5, seconds || 8));

@@ -63,6 +63,7 @@ class BlueprintController extends Controller
 
     public function generate(Request $request, BlueprintGeneratorService $generator): JsonResponse
     {
+        @set_time_limit(300);
         $formatList = implode(',', BlueprintGeneratorService::FORMATS);
 
         $data = $request->validate([
@@ -73,8 +74,11 @@ class BlueprintController extends Controller
             'planned_time' => ['nullable', 'date_format:H:i'],
             'format' => ['nullable', 'in:'.$formatList],
             'force' => ['sometimes', 'boolean'],
-            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:1200'],
-            'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
+            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:3600'],
+            'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:60'],
+            'visual_beat_seconds' => ['nullable', 'integer', 'min:5', 'max:30'],
+            'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+            'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
             'analytics_ai_analysis_id' => ['nullable', 'exists:analytics_ai_analyses,id'],
@@ -94,6 +98,9 @@ class BlueprintController extends Controller
         $options = array_filter([
             'duration_seconds' => $data['duration_seconds'] ?? null,
             'duration_minutes' => $data['duration_minutes'] ?? null,
+            'visual_beat_seconds' => $data['visual_beat_seconds'] ?? $data['beat_seconds'] ?? null,
+            'vo_beat_seconds' => $data['vo_beat_seconds'] ?? null,
+            'beat_seconds' => $data['visual_beat_seconds'] ?? $data['beat_seconds'] ?? null,
             'prefer_stock' => array_key_exists('prefer_stock', $data) ? (bool) $data['prefer_stock'] : null,
             'voice_perspective' => $data['voice_perspective'] ?? null,
             'planned_time' => $data['planned_time'] ?? null,

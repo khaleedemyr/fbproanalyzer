@@ -24,6 +24,7 @@ class ContentBlueprint extends Model
         'engine',
         'duration_seconds',
         'beat_seconds',
+        'vo_beat_seconds',
         'prefer_stock',
         'voice_perspective',
         'scenes',
@@ -43,6 +44,7 @@ class ContentBlueprint extends Model
             'prefer_stock' => 'boolean',
             'duration_seconds' => 'integer',
             'beat_seconds' => 'integer',
+            'vo_beat_seconds' => 'integer',
         ];
     }
 

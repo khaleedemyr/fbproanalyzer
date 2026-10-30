@@ -38,9 +38,15 @@ class BlueprintGeneratorService
 
     protected int $durationSeconds = 15;
 
+    /** Visual plate duration (image changes). */
     protected int $beatSeconds = 5;
 
+    /** Naskah / VO line duration. */
+    protected int $voBeatSeconds = 5;
+
     protected bool $preferStock = true;
+
+    protected string $currentFormat = self::FORMAT_REELS_VO;
 
     protected string $voicePerspective = 'Aku';
 
@@ -60,7 +66,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null,analytics_ai_analysis?:AnalyticsAiAnalysis|null,analytics_ai_analysis_id?:int|null,content_brief?:ContentBrief|null,content_brief_id?:int|null,angle_finding_id?:int|null}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,visual_beat_seconds?:int,vo_beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null,analytics_ai_analysis?:AnalyticsAiAnalysis|null,analytics_ai_analysis_id?:int|null,content_brief?:ContentBrief|null,content_brief_id?:int|null,angle_finding_id?:int|null}  $options
      */
     public function generateFromTopic(
         User $user,
@@ -76,6 +82,7 @@ class BlueprintGeneratorService
         $kit = $brandKit ?? BrandKit::defaultFor($user);
         $topic = trim($topic) !== '' ? trim($topic) : 'Topik psikologi viral';
         $format = $this->normalizeFormat($format);
+        $this->currentFormat = $format;
         $force = $force || (bool) ($options['force'] ?? false);
         $this->applyDurationOptions($format, $options);
         $this->voicePerspective = $this->normalizeVoicePerspective(
@@ -130,11 +137,16 @@ class BlueprintGeneratorService
             }
         }
 
-        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
+        // Video panjang > ~12 mnt @5s VO terlalu besar untuk 1 respons Gemini — pakai template + expand.
+        $skipGeminiLong = $format === self::FORMAT_REELS_PANJANG && $this->voBeatCount() > 72;
+        $gemini = $skipGeminiLong ? null : $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
         } else {
+            if ($skipGeminiLong) {
+                $this->lastWarning = 'Durasi/beat naskah terlalu panjang untuk 1 generate Gemini penuh — blueprint disusun dari template ilustrasi buku + expand timeline.';
+            }
             $payload = match ($format) {
                 self::FORMAT_REELS_PANJANG => $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea),
                 self::FORMAT_REELS_TEXT => $this->buildReelsTextTemplate($kit, $cleanTitle, $cleanTopic, $idea),
@@ -153,6 +165,11 @@ class BlueprintGeneratorService
 
         if ($format === self::FORMAT_REELS_PANJANG) {
             $payload['scenes'] = $this->enrichLongFormBookVisuals(
+                $payload['scenes'],
+                (string) $payload['cover_theme'],
+                $cleanTopic
+            );
+            $payload['scenes'] = $this->normalizeLongFormTimeline(
                 $payload['scenes'],
                 (string) $payload['cover_theme'],
                 $cleanTopic
@@ -221,6 +238,7 @@ class BlueprintGeneratorService
             'engine' => $this->lastEngine,
             'duration_seconds' => $this->durationSeconds,
             'beat_seconds' => $this->beatSeconds,
+            'vo_beat_seconds' => $format === self::FORMAT_REELS_PANJANG ? $this->voBeatSeconds : $this->beatSeconds,
             'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? $this->preferStock : false,
             'voice_perspective' => $this->voicePerspective,
             'scenes' => $payload['scenes'],
@@ -397,15 +415,16 @@ class BlueprintGeneratorService
     {
         $voice = $bp->voice_perspective ?: ($kit->voice_perspective ?: 'Aku');
         $durLabel = $this->humanDuration((int) ($bp->duration_seconds ?: $this->durationSeconds));
-        $beat = (int) ($bp->beat_seconds ?: 5);
+        $visualBeat = (int) ($bp->beat_seconds ?: 10);
+        $voBeat = (int) ($bp->vo_beat_seconds ?: $visualBeat ?: 5);
 
         $lines = [
             $bp->title,
             '🎬 BLUEPRINT REELS PANJANG / VOD (rangkaian ilustrasi bergaya buku)',
             'Tema: "'.$bp->cover_theme.'"',
             'Konsep: '.$bp->story_concept,
-            'Durasi total: '.$durLabel.' · beat '.$beat.' dtk · Sudut pandang: "'.$voice.'"',
-            'Style visual AI: textbook watercolor diagram — image_prompt harus nyambung ke naskah VO tiap beat.',
+            'Durasi total: '.$durLabel.' · visual tiap '.$visualBeat.'s · naskah tiap '.$voBeat.'s · Sudut pandang: "'.$voice.'"',
+            'Style visual AI: textbook watercolor diagram — plate gambar boleh dipakai beberapa baris VO dalam 1 window visual.',
             '',
             'Durasi | Visual (prompt ilustrasi buku / stock / black) | Motion | Naskah VO & Teks Layar',
             '',
@@ -659,8 +678,9 @@ PROMPT;
         $radarBlock = $radarContext !== '' ? "Konteks riset (JANGAN dibaca di VO):\n{$radarContext}\n" : '';
 
         $totalSec = $this->durationSeconds;
-        $beat = $this->beatSeconds;
-        $beatCount = $this->beatCount();
+        $visualBeat = $this->beatSeconds;
+        $voBeat = $this->voBeatSeconds;
+        $beatCount = min(60, $this->voBeatCount());
         $minutes = max(1, (int) round($totalSec / 60));
         $preferStock = $this->preferStock
             ? 'Campur: ~40% AI ilustrasi buku + ~40% stock + ~10% black + bumper antar bab.'
@@ -670,7 +690,9 @@ PROMPT;
 
         return <<<PROMPT
 Kamu adalah penulis MASTER BLUEPRINT VOD psikologi untuk brand "{$kit->name}".
-Durasi {$totalSec}s (~{$minutes} mnt), beat {$beat}s, ~{$beatCount} scene.
+Durasi target {$totalSec}s (~{$minutes} mnt).
+Beat visual (ganti gambar): {$visualBeat}s · Beat naskah VO: {$voBeat}s.
+Generate sekitar {$beatCount} scene inti (sistem akan menyesuaikan ke timeline penuh).
 {$preferStock}
 
 ===== VISUAL VIDEO PANJANG = RANGKAIAN ILUSTRASI BUKU =====
@@ -697,7 +719,7 @@ Angle: {$angle}
 Sudut VO WAJIB: "{$this->voicePerspective}" (narasi dari sudut ini)
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
-Setiap scene timecode "MM:SS - MM:SS" sesuai beat {$beat}s.
+Setiap scene timecode "MM:SS - MM:SS" sesuai beat naskah {$voBeat}s (gambar boleh sama untuk beberapa VO dalam 1 plate visual {$visualBeat}s).
 
 ===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
 - 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik relevan topik.
@@ -964,9 +986,10 @@ TXT;
         }
         $angleLine = $this->spokenLine($idea?->angle) ?: 'Kuasai bingkainya, kunci narasinya, tanyakan balik motif mereka.';
 
-        $beat = $this->beatSeconds;
+        $visualBeat = max(5, $this->beatSeconds);
+        $voBeat = max(3, $this->voBeatSeconds);
         $total = $this->durationSeconds;
-        $count = $this->beatCount();
+        $count = max(2, intdiv($total, $voBeat));
 
         $sectionDefs = [
             ['THE GOLDEN HOOK', 0.20, [
@@ -1016,6 +1039,10 @@ TXT;
         $t = 0;
         $voIdx = 0;
         $stockIdx = 0;
+        $lastPlate = -1;
+        $plateVisual = '';
+        $plateType = 'ai';
+        $plateMotion = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable, subtle paper texture motion.';
 
         foreach ($sectionDefs as $sIdx => $def) {
             $name = $def[0];
@@ -1024,41 +1051,48 @@ TXT;
 
             for ($i = 0; $i < $n; $i++) {
                 $start = $t;
-                $end = $t + $beat;
+                $end = $t + $voBeat;
                 $mod = $i % 5;
 
                 $vo = $vosPool[$voIdx % count($vosPool)];
                 $voIdx++;
                 $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $cover, 34, ''));
 
-                if ($this->preferStock && $mod === 1) {
-                    $type = 'stock';
-                    $visual = $stocks[$stockIdx++ % count($stocks)];
-                    $motion = '-';
-                } elseif ($mod === 4) {
-                    $type = 'black';
-                    $visual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
-                    $motion = '-';
-                } else {
-                    $type = 'ai';
-                    $visual = $this->bookIllustrationPrompt($vo, $shortTopic, $on);
-                    $motion = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable, subtle paper texture motion.';
+                // Plate visual diganti tiap visualBeat (bisa mencakup beberapa baris VO).
+                $visualPlateIndex = intdiv($start, $visualBeat);
+                if ($visualPlateIndex !== $lastPlate) {
+                    $lastPlate = $visualPlateIndex;
+                    if ($this->preferStock && $mod === 1) {
+                        $plateType = 'stock';
+                        $plateVisual = $stocks[$stockIdx++ % count($stocks)];
+                        $plateMotion = '-';
+                    } elseif ($mod === 4) {
+                        $plateType = 'black';
+                        $plateVisual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
+                        $plateMotion = '-';
+                    } else {
+                        $plateType = 'ai';
+                        $plateVisual = $this->bookIllustrationPrompt($vo, $shortTopic, $on);
+                        $plateMotion = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable, subtle paper texture motion.';
+                    }
                 }
 
                 $scenes[] = [
-                    'section' => $name.' ('.$this->formatTimecode($sectionStart, $sectionStart + ($n * $beat)).')',
+                    'section' => $name.' ('.$this->formatTimecode($sectionStart, $sectionStart + ($n * $voBeat)).')',
                     'timecode' => $this->formatTimecode($start, $end),
-                    'visual_type' => $type,
-                    'image_prompt' => $visual,
-                    'motion_prompt' => $motion,
+                    'visual_type' => $plateType,
+                    'image_prompt' => $plateVisual,
+                    'motion_prompt' => $plateMotion,
                     'vo' => $vo,
                     'on_screen' => $on,
+                    'visual_plate' => $visualPlateIndex,
+                    'beat_seconds' => $voBeat,
                 ];
                 $t = $end;
             }
 
             $start = $t;
-            $end = $t + $beat;
+            $end = $t + $voBeat;
             $scenes[] = [
                 'section' => $name.' ('.$this->formatTimecode($sectionStart, $end).')',
                 'timecode' => $this->formatTimecode($start, $end),
@@ -1067,23 +1101,9 @@ TXT;
                 'motion_prompt' => '(SFX Bumper / Jeda VO)',
                 'vo' => '',
                 'on_screen' => $sIdx < count($sectionDefs) - 1 ? $sectionDefs[$sIdx + 1][0] : 'OUTRO',
+                'beat_seconds' => $voBeat,
             ];
             $t = $end;
-        }
-
-        while ((count($scenes) * $beat) > ($total + $beat) && count($scenes) > 12) {
-            for ($i = count($scenes) - 2; $i > 5; $i--) {
-                if (($scenes[$i]['visual_type'] ?? '') !== 'bumper') {
-                    array_splice($scenes, $i, 1);
-                    break;
-                }
-            }
-            $t = 0;
-            foreach ($scenes as &$sc) {
-                $sc['timecode'] = $this->formatTimecode($t, $t + $beat);
-                $t += $beat;
-            }
-            unset($sc);
         }
 
         $minutes = max(1, (int) round($this->durationSeconds / 60));
@@ -1095,7 +1115,7 @@ TXT;
         return [
             'title' => 'Episode: '.Str::limit($theme, 100, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Master blueprint {$minutes} mnt (beat {$beat}s) tentang {$shortTopic}: rangkaian ilustrasi bergaya buku yang mengikuti naskah. Hook → Bab → Penutup + bumper.",
+            'story_concept' => "Master blueprint {$minutes} mnt (visual {$visualBeat}s · naskah {$voBeat}s) tentang {$shortTopic}: rangkaian ilustrasi bergaya buku. Hook → Bab → Penutup + bumper.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. Professional film grain, no offensive elements.",
             'caption' => $caption,
@@ -1183,11 +1203,12 @@ TXT;
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,visual_beat_seconds?:int,vo_beat_seconds?:int,prefer_stock?:bool}  $options
      */
     protected function applyDurationOptions(string $format, array $options): void
     {
         $this->beatSeconds = 5;
+        $this->voBeatSeconds = 5;
         $this->preferStock = array_key_exists('prefer_stock', $options)
             ? (bool) $options['prefer_stock']
             : true;
@@ -1195,6 +1216,7 @@ TXT;
         if ($format === self::FORMAT_FOTO) {
             $this->durationSeconds = 0;
             $this->beatSeconds = 0;
+            $this->voBeatSeconds = 0;
 
             return;
         }
@@ -1203,11 +1225,17 @@ TXT;
             $sec = (int) ($options['duration_seconds'] ?? 8);
             $this->durationSeconds = max(5, min(30, $sec));
             $this->beatSeconds = $this->durationSeconds;
+            $this->voBeatSeconds = $this->durationSeconds;
 
             return;
         }
 
         if ($format === self::FORMAT_REELS_PANJANG) {
+            $visualBeat = (int) ($options['visual_beat_seconds'] ?? $options['beat_seconds'] ?? 10);
+            $voBeat = (int) ($options['vo_beat_seconds'] ?? 5);
+            $this->beatSeconds = max(5, min(30, $visualBeat));
+            $this->voBeatSeconds = max(3, min(30, $voBeat));
+
             if (! empty($options['duration_seconds'])) {
                 $sec = (int) $options['duration_seconds'];
             } elseif (! empty($options['duration_minutes'])) {
@@ -1215,22 +1243,39 @@ TXT;
             } else {
                 $sec = 10 * 60;
             }
-            $sec = max(3 * 60, min(20 * 60, $sec));
-            $this->durationSeconds = (int) (round($sec / $this->beatSeconds) * $this->beatSeconds);
-        } else {
-            $sec = (int) ($options['duration_seconds'] ?? 15);
-            $sec = max(10, min(90, $sec));
-            $this->durationSeconds = (int) (round($sec / $this->beatSeconds) * $this->beatSeconds);
+            // 5 menit … 60 menit
+            $sec = max(5 * 60, min(60 * 60, $sec));
+            $step = max(1, min($this->voBeatSeconds, $this->beatSeconds));
+            $this->durationSeconds = (int) (round($sec / $step) * $step);
+
+            return;
         }
+
+        $sec = (int) ($options['duration_seconds'] ?? 15);
+        $sec = max(10, min(90, $sec));
+        $this->durationSeconds = (int) (round($sec / $this->beatSeconds) * $this->beatSeconds);
+        $this->voBeatSeconds = $this->beatSeconds;
     }
 
     protected function beatCount(): int
     {
-        if ($this->beatSeconds <= 0) {
+        $beat = $this->currentFormat === self::FORMAT_REELS_PANJANG
+            ? $this->voBeatSeconds
+            : $this->beatSeconds;
+        if ($beat <= 0) {
             return 1;
         }
 
-        return max(2, intdiv($this->durationSeconds, $this->beatSeconds));
+        return max(2, intdiv($this->durationSeconds, $beat));
+    }
+
+    protected function voBeatCount(): int
+    {
+        if ($this->voBeatSeconds <= 0) {
+            return $this->beatCount();
+        }
+
+        return max(2, intdiv($this->durationSeconds, $this->voBeatSeconds));
     }
 
     protected function formatTimecode(int $startSec, int $endSec): string
@@ -1626,6 +1671,92 @@ TXT;
 
         // Relaks: cukup 1 kata kunci, atau prompt sudah style buku (dicek pemanggil).
         return $hits >= 1;
+    }
+
+    /**
+     * Samakan timeline panjang: 1 baris per beat naskah (vo_beat), plate gambar per visual_beat.
+     *
+     * @param  array<int, array<string, mixed>>  $scenes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizeLongFormTimeline(array $scenes, string $coverTheme, string $topic): array
+    {
+        $voBeat = max(3, (int) $this->voBeatSeconds);
+        $visualBeat = max(5, (int) $this->beatSeconds);
+        $total = max($voBeat * 2, (int) $this->durationSeconds);
+        $target = max(2, intdiv($total, $voBeat));
+
+        $source = array_values(array_filter($scenes, fn ($s) => is_array($s)));
+        if ($source === []) {
+            return [];
+        }
+
+        $srcCount = count($source);
+        $out = [];
+        for ($i = 0; $i < $target; $i++) {
+            if ($srcCount === $target) {
+                $src = $source[$i];
+            } elseif ($srcCount > $target) {
+                $src = $source[(int) floor($i * $srcCount / $target)] ?? $source[$srcCount - 1];
+            } else {
+                // Expand: sebar sumber sepanjang timeline (bukan cycle ketat → VO merata).
+                $src = $source[(int) floor($i * $srcCount / $target)] ?? $source[$srcCount - 1];
+            }
+
+            $start = $i * $voBeat;
+            $end = $start + $voBeat;
+            $type = Str::lower((string) ($src['visual_type'] ?? 'ai'));
+            if ($type === '') {
+                $type = 'ai';
+            }
+
+            $out[] = [
+                'section' => (string) ($src['section'] ?? 'Blueprint'),
+                'timecode' => $this->formatTimecode($start, $end),
+                'visual_type' => $type,
+                'image_prompt' => trim((string) ($src['image_prompt'] ?? '')),
+                'motion_prompt' => (string) ($src['motion_prompt'] ?? '-'),
+                'vo' => trim((string) ($src['vo'] ?? '')),
+                'on_screen' => trim((string) ($src['on_screen'] ?? '')),
+                'beat_seconds' => $voBeat,
+                'visual_plate' => intdiv($start, $visualBeat),
+            ];
+        }
+
+        // Satu plate visual = satu image_prompt untuk semua baris naskah dalam window visualBeat.
+        $platePrompt = [];
+        $plateType = [];
+        $plateMotion = [];
+        foreach ($out as $idx => $sc) {
+            $plate = (int) ($sc['visual_plate'] ?? 0);
+            $type = Str::lower((string) ($sc['visual_type'] ?? 'ai'));
+
+            if (in_array($type, ['bumper', 'black'], true)) {
+                continue;
+            }
+
+            if (! isset($platePrompt[$plate])) {
+                $vo = (string) ($sc['vo'] ?? '');
+                $on = (string) ($sc['on_screen'] ?? '');
+                $img = trim((string) ($sc['image_prompt'] ?? ''));
+                $looksBook = (bool) preg_match('/textbook|watercolor|hand-drawn|illustration plate|infographic|book plate|sketched/i', $img);
+                if ($img === '' || ! $looksBook || str_starts_with($img, '(Video Stok') || str_starts_with($img, '(Layar Hitam')) {
+                    $img = $this->bookIllustrationPrompt($vo !== '' ? $vo : $coverTheme, $topic, $on);
+                    $type = 'ai';
+                }
+                $platePrompt[$plate] = $img;
+                $plateType[$plate] = $type === 'stock' ? 'stock' : 'ai';
+                $plateMotion[$plate] = trim((string) ($sc['motion_prompt'] ?? '')) !== '' && ($sc['motion_prompt'] ?? '') !== '-'
+                    ? (string) $sc['motion_prompt']
+                    : 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
+            }
+
+            $out[$idx]['image_prompt'] = $platePrompt[$plate];
+            $out[$idx]['visual_type'] = $plateType[$plate];
+            $out[$idx]['motion_prompt'] = $plateMotion[$plate];
+        }
+
+        return $out;
     }
 
     /**

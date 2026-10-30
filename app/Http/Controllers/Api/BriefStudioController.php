@@ -89,15 +89,18 @@ class BriefStudioController extends Controller
     public function blueprint(Request $request, ContentBrief $contentBrief, BriefStudioService $studio): JsonResponse
     {
         abort_unless($contentBrief->user_id === $request->user()->id, 403);
-        @set_time_limit(180);
+        @set_time_limit(300);
 
         $formatList = implode(',', BlueprintGeneratorService::FORMATS);
         $data = $request->validate([
             'format' => ['nullable', 'in:'.$formatList],
             'planned_date' => ['nullable', 'date'],
             'planned_time' => ['nullable', 'date_format:H:i'],
-            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:1200'],
-            'duration_minutes' => ['nullable', 'integer', 'min:3', 'max:20'],
+            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:3600'],
+            'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:60'],
+            'visual_beat_seconds' => ['nullable', 'integer', 'min:5', 'max:30'],
+            'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+            'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
             'force' => ['sometimes', 'boolean'],
