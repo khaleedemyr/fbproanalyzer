@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import http from '../api/http';
 
 const router = useRouter();
+const route = useRoute();
 const loading = ref(true);
 const composing = ref(false);
 const generating = ref(false);
@@ -24,6 +25,10 @@ const textDurationSeconds = ref(8);
 const visualBeatSeconds = ref(10);
 const voBeatSeconds = ref(5);
 const preferStock = ref(false);
+const seriesTitle = ref('');
+const episodeNumber = ref(null);
+const parentBlueprintId = ref(null);
+const previousEpisodesText = ref('');
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -48,6 +53,57 @@ const isVo = computed(() => format.value === 'reels_vo');
 const isLong = computed(() => format.value === 'reels_panjang');
 const isText = computed(() => format.value === 'reels_text');
 const needsVoice = computed(() => isVo.value || isLong.value);
+const sequelActive = computed(() =>
+    !!seriesTitle.value.trim() || !!episodeNumber.value || !!previousEpisodesText.value.trim()
+);
+
+function parsePreviousEpisodes(text) {
+    return String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, i) => {
+            const m = line.match(/^(?:episode|ep)\s*(\d+)\s*[:.\-]?\s*(.+)$/i);
+            if (m) return { n: Number(m[1]), title: m[2].trim() };
+            return { n: i + 1, title: line };
+        })
+        .slice(0, 20);
+}
+
+function formatPreviousEpisodes(list) {
+    if (!Array.isArray(list) || !list.length) return '';
+    return list
+        .map((ep) => `Episode ${ep.n || '?'}: ${ep.title || ''}`.trim())
+        .join('\n');
+}
+
+function applySequelFromQuery() {
+    const q = route.query || {};
+    if (q.series_title) seriesTitle.value = String(q.series_title);
+    if (q.episode_number) episodeNumber.value = Number(q.episode_number) || null;
+    if (q.parent_blueprint_id) parentBlueprintId.value = Number(q.parent_blueprint_id) || null;
+    if (q.previous_episodes) {
+        try {
+            const decoded = typeof q.previous_episodes === 'string' && q.previous_episodes.startsWith('[')
+                ? JSON.parse(q.previous_episodes)
+                : String(q.previous_episodes);
+            previousEpisodesText.value = Array.isArray(decoded)
+                ? formatPreviousEpisodes(decoded)
+                : String(decoded).replace(/\|/g, '\n');
+        } catch {
+            previousEpisodesText.value = String(q.previous_episodes).replace(/\|/g, '\n');
+        }
+    }
+    if (q.topic) topic.value = String(q.topic);
+    if (q.format && formatLabel[q.format]) format.value = String(q.format);
+    if (sequelActive.value && !format.value) format.value = 'reels_panjang';
+    if (sequelActive.value && format.value === 'reels_vo') format.value = 'reels_panjang';
+    if (sequelActive.value) {
+        message.value = `Mode sequel siap${seriesTitle.value ? ': ' + seriesTitle.value : ''}`
+            + (episodeNumber.value ? ` · Episode ${episodeNumber.value}` : '')
+            + '. Pilih Radar/Angle/Analisa → Compose Resume.';
+    }
+}
 
 const resume = computed(() => brief.value?.resume || {});
 const warnings = computed(() => sources.value?.warnings || brief.value?.inputs_snapshot?.warnings || []);
@@ -102,7 +158,12 @@ function syncEditFromBrief(row) {
     editHook.value = String(r.hook || '');
     editAngle.value = String(r.angle || '');
     if (r.suggested_format) format.value = r.suggested_format;
-    // Jangan overwrite seed topik otomatis — biar user bisa pilih tema saran.
+    if (row?.series_title) seriesTitle.value = String(row.series_title);
+    if (row?.episode_number) episodeNumber.value = Number(row.episode_number) || null;
+    if (row?.parent_blueprint_id) parentBlueprintId.value = Number(row.parent_blueprint_id) || null;
+    if (Array.isArray(row?.previous_episodes) && row.previous_episodes.length) {
+        previousEpisodesText.value = formatPreviousEpisodes(row.previous_episodes);
+    }
 }
 
 function applyTitleOption(opt) {
@@ -172,6 +233,11 @@ async function compose() {
         if (sources.value?.analytics?.id) {
             payload.analytics_ai_analysis_id = sources.value.analytics.id;
         }
+        if (seriesTitle.value.trim()) payload.series_title = seriesTitle.value.trim();
+        if (episodeNumber.value) payload.episode_number = Number(episodeNumber.value);
+        if (parentBlueprintId.value) payload.parent_blueprint_id = Number(parentBlueprintId.value);
+        const prev = parsePreviousEpisodes(previousEpisodesText.value);
+        if (prev.length) payload.previous_episodes = prev;
         const { data } = await http.post('/brief-studio/compose', payload, { timeout: 120000 });
         brief.value = data.data;
         syncEditFromBrief(brief.value);
@@ -212,6 +278,11 @@ async function makeBlueprint() {
         } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
         }
+        if (seriesTitle.value.trim()) payload.series_title = seriesTitle.value.trim();
+        if (episodeNumber.value) payload.episode_number = Number(episodeNumber.value);
+        if (parentBlueprintId.value) payload.parent_blueprint_id = Number(parentBlueprintId.value);
+        const prevBp = parsePreviousEpisodes(previousEpisodesText.value);
+        if (prevBp.length) payload.previous_episodes = prevBp;
 
         // Panjang = async: server langsung balas stub, generate jalan setelah response.
         const { data } = await http.post(
@@ -248,6 +319,7 @@ function openBrief(row) {
 }
 
 onMounted(async () => {
+    applySequelFromQuery();
     await loadSources();
     await loadHistory();
 });
@@ -319,6 +391,59 @@ onMounted(async () => {
             <p class="mt-2 text-xs text-slate-500">
                 Resume history kamu sering sama karena seed kosong → selalu ambil Angle/Analisa lama. Pilih tema di sini dulu, baru Compose Resume.
                 Sumber: Radar {{ available.radar_count || 0 }} · Angle {{ available.angle_count || 0 }} · Analisa AI {{ available.analytics_count || 0 }}
+            </p>
+        </section>
+
+        <section class="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
+            <div class="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                    <h3 class="font-semibold text-slate-900">Sequel / Serial (opsional)</h3>
+                    <p class="mt-1 text-xs text-slate-600">
+                        Isi supaya AI tidak mengulang episode lama. Radar × Angle × Analisa tetap dipakai saat Compose.
+                    </p>
+                </div>
+                <button
+                    v-if="!seriesTitle"
+                    type="button"
+                    class="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-900"
+                    @click="seriesTitle = 'Dark Psychology: Manipulasi'; episodeNumber = episodeNumber || 4; previousEpisodesText = previousEpisodesText || 'Episode 1: Wajah Serigala\nEpisode 2: Taktik Repetisi & Sindrom Mantan Kaya\nEpisode 3: Taktik Frame Control & Pembalikan Realita'; format = 'reels_panjang'"
+                >
+                    Isi contoh Dark Psychology
+                </button>
+            </div>
+            <div class="mt-3 grid gap-3 md:grid-cols-3">
+                <label class="block text-sm md:col-span-2">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Judul serial</span>
+                    <input
+                        v-model="seriesTitle"
+                        placeholder="Dark Psychology: Manipulasi"
+                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    />
+                </label>
+                <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Episode ke-</span>
+                    <input
+                        v-model.number="episodeNumber"
+                        type="number"
+                        min="1"
+                        max="99"
+                        placeholder="4"
+                        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    />
+                </label>
+            </div>
+            <label class="mt-3 block text-sm">
+                <span class="mb-1 block text-xs font-semibold text-slate-500">Episode sebelumnya (1 baris = 1 episode)</span>
+                <textarea
+                    v-model="previousEpisodesText"
+                    rows="3"
+                    placeholder="Episode 1: Wajah Serigala&#10;Episode 2: Taktik Repetisi & Sindrom Mantan Kaya&#10;Episode 3: Taktik Frame Control & Pembalikan Realita"
+                    class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                />
+            </label>
+            <p v-if="sequelActive" class="mt-2 text-xs font-medium text-indigo-900">
+                Sequel aktif{{ seriesTitle ? ': ' + seriesTitle : '' }}{{ episodeNumber ? ' · Ep ' + episodeNumber : '' }}
+                {{ parentBlueprintId ? ' · dari blueprint #' + parentBlueprintId : '' }}
             </p>
         </section>
 

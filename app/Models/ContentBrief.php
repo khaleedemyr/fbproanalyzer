@@ -14,6 +14,10 @@ class ContentBrief extends Model
         'status',
         'engine',
         'source_topic',
+        'series_title',
+        'episode_number',
+        'parent_blueprint_id',
+        'previous_episodes',
         'trend_signal_ids',
         'angle_finding_id',
         'angle_indexes',
@@ -32,6 +36,8 @@ class ContentBrief extends Model
             'angle_indexes' => 'array',
             'inputs_snapshot' => 'array',
             'resume' => 'array',
+            'previous_episodes' => 'array',
+            'episode_number' => 'integer',
         ];
     }
 
@@ -60,6 +66,11 @@ class ContentBrief extends Model
         return $this->hasMany(ContentBlueprint::class);
     }
 
+    public function parentBlueprint(): BelongsTo
+    {
+        return $this->belongsTo(ContentBlueprint::class, 'parent_blueprint_id');
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -71,6 +82,10 @@ class ContentBrief extends Model
             'status' => $this->status,
             'engine' => $this->engine,
             'source_topic' => $this->source_topic,
+            'series_title' => $this->series_title,
+            'episode_number' => $this->episode_number,
+            'parent_blueprint_id' => $this->parent_blueprint_id,
+            'previous_episodes' => $this->previous_episodes ?? [],
             'trend_signal_ids' => $this->trend_signal_ids ?? [],
             'angle_finding_id' => $this->angle_finding_id,
             'angle_indexes' => $this->angle_indexes ?? [],

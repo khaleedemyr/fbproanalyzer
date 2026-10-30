@@ -10,6 +10,7 @@ use App\Models\ContentIdea;
 use App\Models\TrendSignal;
 use App\Models\User;
 use App\Support\BlueprintProgress;
+use App\Support\SequelContext;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -128,8 +129,10 @@ class BlueprintGeneratorService
 
         $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
         $cleanTitle = $this->coverTitle($cleanTopic, $idea);
+        $sequel = $this->resolveSequelMeta($brief, $options);
         $extraContext = trim(implode("\n\n", array_filter([
             $this->briefContext($brief),
+            SequelContext::promptBlock($sequel),
             $this->radarContext($signal),
             $this->analyticsContext($analysis),
         ])));
@@ -292,6 +295,13 @@ class BlueprintGeneratorService
                 .'Kolom vo_beat_seconds belum ada di DB — jalankan: php artisan migrate --force');
         }
 
+        if (Schema::hasColumn('content_blueprints', 'series_title')) {
+            $attrs['series_title'] = $sequel['series_title'];
+            $attrs['episode_number'] = $sequel['episode_number'];
+            $attrs['parent_blueprint_id'] = $sequel['parent_blueprint_id'];
+            $attrs['previous_episodes'] = $sequel['previous_episodes'] !== [] ? $sequel['previous_episodes'] : null;
+        }
+
         $this->reportProgress(95, 'Menyimpan blueprint…');
 
         $existingId = (int) ($options['existing_blueprint_id'] ?? 0);
@@ -316,11 +326,22 @@ class BlueprintGeneratorService
 
             return $created;
         } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            $stripped = false;
             // Hostinger belum migrate: buang kolom baru lalu coba lagi.
-            if (str_contains($e->getMessage(), 'vo_beat_seconds') && isset($attrs['vo_beat_seconds'])) {
+            if (str_contains($msg, 'vo_beat_seconds') && isset($attrs['vo_beat_seconds'])) {
                 unset($attrs['vo_beat_seconds']);
+                $stripped = true;
+            }
+            foreach (['series_title', 'episode_number', 'parent_blueprint_id', 'previous_episodes'] as $col) {
+                if (str_contains($msg, $col) && array_key_exists($col, $attrs)) {
+                    unset($attrs[$col]);
+                    $stripped = true;
+                }
+            }
+            if ($stripped) {
                 $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
-                    .'Simpan tanpa vo_beat_seconds — jalankan migrate di server.');
+                    .'Simpan tanpa kolom baru — jalankan migrate / SQL sequel di server.');
 
                 $created = ContentBlueprint::query()->create($attrs);
                 BlueprintProgress::done($created->id, 'Blueprint siap');
@@ -395,10 +416,34 @@ class BlueprintGeneratorService
             $attrs['vo_beat_seconds'] = $this->voBeatSeconds;
         }
 
+        if (Schema::hasColumn('content_blueprints', 'series_title')) {
+            $sequel = $this->resolveSequelMeta($brief, $options);
+            $attrs['series_title'] = $sequel['series_title'];
+            $attrs['episode_number'] = $sequel['episode_number'];
+            $attrs['parent_blueprint_id'] = $sequel['parent_blueprint_id'];
+            $attrs['previous_episodes'] = $sequel['previous_episodes'] !== [] ? $sequel['previous_episodes'] : null;
+        }
+
         $bp = ContentBlueprint::query()->create($attrs);
         BlueprintProgress::set($bp->id, 5, 'Antrian generate dimulai…', 'generating');
 
         return $bp;
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array{series_title:?string,episode_number:?int,parent_blueprint_id:?int,previous_episodes:list<array{n:int,title:string,hook_or_angle?:string}>}
+     */
+    protected function resolveSequelMeta(?ContentBrief $brief, array $options = []): array
+    {
+        return SequelContext::normalize([
+            'series_title' => $options['series_title'] ?? $brief?->series_title,
+            'episode_number' => $options['episode_number'] ?? $brief?->episode_number,
+            'parent_blueprint_id' => $options['parent_blueprint_id'] ?? $brief?->parent_blueprint_id,
+            'previous_episodes' => $options['previous_episodes']
+                ?? $brief?->previous_episodes
+                ?? [],
+        ]);
     }
 
     /**
@@ -1659,6 +1704,18 @@ TXT;
         }
         $lines[] = 'CTA: '.($resume['cta'] ?? '-');
         $lines[] = 'Blueprint HARUS selaras dengan resume gabungan ini (tren + komentar + data channel), bukan generic.';
+
+        $sequel = SequelContext::normalize([
+            'series_title' => $brief->series_title,
+            'episode_number' => $brief->episode_number,
+            'parent_blueprint_id' => $brief->parent_blueprint_id,
+            'previous_episodes' => $brief->previous_episodes ?? [],
+        ]);
+        $sequelBlock = SequelContext::promptBlock($sequel);
+        if ($sequelBlock !== '') {
+            $lines[] = '';
+            $lines[] = $sequelBlock;
+        }
 
         return implode("\n", $lines);
     }

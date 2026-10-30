@@ -11,9 +11,11 @@ use App\Models\ContentBlueprint;
 use App\Models\TrendSignal;
 use App\Models\User;
 use App\Services\Blueprint\BlueprintGeneratorService;
+use App\Support\SequelContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class BriefStudioService
@@ -141,9 +143,12 @@ class BriefStudioService
         }
 
         $kit = BrandKit::defaultFor($user);
+        $sequel = SequelContext::normalize($filters);
         $topic = trim((string) ($filters['topic'] ?? $picked['seed_topic'] ?? ''));
         if ($topic === '') {
-            $topic = 'psikologi gelap viral';
+            $topic = $sequel['series_title']
+                ? ($sequel['series_title'].($sequel['episode_number'] ? ' Episode '.$sequel['episode_number'] : ''))
+                : 'psikologi gelap viral';
         }
 
         $snapshot = [
@@ -153,6 +158,7 @@ class BriefStudioService
                 : null,
             'analytics' => $picked['analytics']?->toAnalysisArray(),
             'warnings' => $picked['warnings'],
+            'sequel' => $sequel,
         ];
 
         $gemini = $this->composeWithGemini($kit, $topic, $snapshot);
@@ -166,9 +172,16 @@ class BriefStudioService
             $warning = 'Gemini tidak tersedia — resume pakai template gabungan.';
         }
 
+        if (SequelContext::isActive($sequel) && $sequel['episode_number']) {
+            $wt = trim((string) ($resume['working_title'] ?? ''));
+            if ($wt !== '' && ! preg_match('/episode\s*'.$sequel['episode_number'].'\b/iu', $wt)) {
+                $resume['working_title'] = 'Episode '.$sequel['episode_number'].': '.$wt;
+            }
+        }
+
         $markdown = $this->resumeToMarkdown($resume, $snapshot);
 
-        return ContentBrief::query()->create([
+        $attrs = [
             'user_id' => $user->id,
             'title' => Str::limit((string) ($resume['working_title'] ?? $resume['headline'] ?? $topic), 160, ''),
             'status' => 'ready',
@@ -182,7 +195,16 @@ class BriefStudioService
             'resume' => $resume,
             'resume_markdown' => $markdown,
             'warning' => $warning,
-        ]);
+        ];
+
+        if (Schema::hasColumn('content_briefs', 'series_title')) {
+            $attrs['series_title'] = $sequel['series_title'];
+            $attrs['episode_number'] = $sequel['episode_number'];
+            $attrs['parent_blueprint_id'] = $sequel['parent_blueprint_id'];
+            $attrs['previous_episodes'] = $sequel['previous_episodes'];
+        }
+
+        return ContentBrief::query()->create($attrs);
     }
 
     /**
@@ -238,6 +260,22 @@ class BriefStudioService
             ? true
             : (array_key_exists('use_ai', $options) ? (bool) $options['use_ai'] : true);
 
+        // Sequel dari request (override) atau dari brief yang sudah tersimpan.
+        $sequel = SequelContext::normalize([
+            'series_title' => $options['series_title'] ?? $brief->series_title,
+            'episode_number' => $options['episode_number'] ?? $brief->episode_number,
+            'parent_blueprint_id' => $options['parent_blueprint_id'] ?? $brief->parent_blueprint_id,
+            'previous_episodes' => $options['previous_episodes'] ?? $brief->previous_episodes ?? [],
+        ]);
+        if (Schema::hasColumn('content_briefs', 'series_title') && SequelContext::isActive($sequel)) {
+            $brief->forceFill([
+                'series_title' => $sequel['series_title'],
+                'episode_number' => $sequel['episode_number'],
+                'parent_blueprint_id' => $sequel['parent_blueprint_id'],
+                'previous_episodes' => $sequel['previous_episodes'],
+            ])->save();
+        }
+
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,
             'duration_minutes' => $options['duration_minutes'] ?? null,
@@ -254,6 +292,10 @@ class BriefStudioService
             'analytics_ai_analysis_id' => $brief->analytics_ai_analysis_id,
             'content_brief_id' => $brief->id,
             'angle_finding_id' => $brief->angle_finding_id,
+            'series_title' => $sequel['series_title'],
+            'episode_number' => $sequel['episode_number'],
+            'parent_blueprint_id' => $sequel['parent_blueprint_id'],
+            'previous_episodes' => $sequel['previous_episodes'] !== [] ? $sequel['previous_episodes'] : null,
         ], fn ($v) => $v !== null);
 
         // Reels panjang (5–60 mnt): stub + generate AFTER response → proxy tidak putus.
@@ -535,12 +577,17 @@ class BriefStudioService
                 .collect($an['avoid'] ?? [])->take(4)->map(fn ($x) => '- '.$x)->implode("\n");
         }
 
+        $sequelBlock = SequelContext::promptBlock(
+            is_array($snapshot['sequel'] ?? null) ? $snapshot['sequel'] : []
+        );
+        $sequelSection = $sequelBlock !== '' ? "\n=== SEQUEL / SERIAL ===\n{$sequelBlock}\n" : '';
+
         $prompt = <<<PROMPT
 Kamu Content Strategist untuk brand "{$kit->name}" niche {$kit->niche}.
 Tugas: GABUNGKAN 3 sumber data jadi 1 RESUME konten yang tajam, siap jadi blueprint viral.
 
 Seed topik user: {$topic}
-
+{$sequelSection}
 === AUTO RADAR (tren pasar) ===
 {$radarBlock}
 
@@ -555,6 +602,7 @@ Aturan:
 - Pilih 1 sudut paling tajam (bukan rata-rata 3 sumber).
 - Hook harus konfrontatif / emosional, bukan edukasi generic.
 - JANGAN masukkan angka metrik mentah ke hook/judul yang akan dibaca VO.
+- Kalau ada blok SEQUEL: working_title harus taktik BARU (bukan ulang episode lama); suggested_format boleh "reels_panjang" untuk episode serial.
 - Bahasa Indonesia.
 
 Keluarkan JSON SAJA:
@@ -746,6 +794,17 @@ PROMPT;
             '- Angle Finding: '.(data_get($snapshot, 'angle_finding.id') ?: '-'),
             '- Analytics AI: '.(data_get($snapshot, 'analytics.id') ?: '-'),
         ];
+
+        $sequel = is_array($snapshot['sequel'] ?? null) ? $snapshot['sequel'] : [];
+        if (SequelContext::isActive($sequel)) {
+            $lines[] = '';
+            $lines[] = '## Sequel';
+            $lines[] = '- Serial: '.($sequel['series_title'] ?? '-');
+            $lines[] = '- Episode: '.($sequel['episode_number'] ?? '-');
+            foreach ($sequel['previous_episodes'] ?? [] as $ep) {
+                $lines[] = '- Ep'.($ep['n'] ?? '?').': '.($ep['title'] ?? '-');
+            }
+        }
 
         return implode("\n", $lines);
     }

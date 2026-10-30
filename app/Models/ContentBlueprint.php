@@ -19,6 +19,10 @@ class ContentBlueprint extends Model
         'cover_theme',
         'story_concept',
         'source_topic',
+        'series_title',
+        'episode_number',
+        'parent_blueprint_id',
+        'previous_episodes',
         'status',
         'format',
         'engine',
@@ -40,11 +44,13 @@ class ContentBlueprint extends Model
         return [
             'scenes' => 'array',
             'title_options' => 'array',
+            'previous_episodes' => 'array',
             'planned_date' => 'date',
             'prefer_stock' => 'boolean',
             'duration_seconds' => 'integer',
             'beat_seconds' => 'integer',
             'vo_beat_seconds' => 'integer',
+            'episode_number' => 'integer',
         ];
     }
 
@@ -91,5 +97,10 @@ class ContentBlueprint extends Model
     public function angleFinding(): BelongsTo
     {
         return $this->belongsTo(AngleFinding::class);
+    }
+
+    public function parentBlueprint(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_blueprint_id');
     }
 }

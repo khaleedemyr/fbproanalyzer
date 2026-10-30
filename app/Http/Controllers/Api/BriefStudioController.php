@@ -66,6 +66,10 @@ class BriefStudioController extends Controller
             'angle_indexes' => ['nullable', 'array', 'max:5'],
             'angle_indexes.*' => ['integer', 'min:0', 'max:20'],
             'analytics_ai_analysis_id' => ['nullable', 'integer', 'exists:analytics_ai_analyses,id'],
+            'series_title' => ['nullable', 'string', 'max:180'],
+            'episode_number' => ['nullable', 'integer', 'min:1', 'max:99'],
+            'parent_blueprint_id' => ['nullable', 'integer', 'exists:content_blueprints,id'],
+            'previous_episodes' => ['nullable'],
         ]);
 
         try {
@@ -119,6 +123,10 @@ class BriefStudioController extends Controller
                 'working_title' => ['nullable', 'string', 'max:200'],
                 'hook' => ['nullable', 'string', 'max:2000'],
                 'angle' => ['nullable', 'string', 'max:4000'],
+                'series_title' => ['nullable', 'string', 'max:180'],
+                'episode_number' => ['nullable', 'integer', 'min:1', 'max:99'],
+                'parent_blueprint_id' => ['nullable', 'integer', 'exists:content_blueprints,id'],
+                'previous_episodes' => ['nullable'],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

@@ -288,6 +288,39 @@ async function removeItem() {
     router.push({ name: 'calendar' });
 }
 
+function continueSequel() {
+    if (!bp.value) return;
+    const series = String(bp.value.series_title || '').trim()
+        || 'Dark Psychology: Manipulasi';
+    const currentEp = Number(bp.value.episode_number) || 0;
+    const nextEp = currentEp > 0 ? currentEp + 1 : 2;
+    const prev = Array.isArray(bp.value.previous_episodes)
+        ? [...bp.value.previous_episodes]
+        : [];
+    const selfTitle = String(bp.value.cover_theme || bp.value.title || '').trim();
+    if (selfTitle) {
+        const already = prev.some((p) => String(p.title || '').toLowerCase() === selfTitle.toLowerCase());
+        if (!already) {
+            prev.push({
+                n: currentEp || prev.length + 1,
+                title: selfTitle,
+                hook_or_angle: String(bp.value.story_concept || '').slice(0, 180),
+            });
+        }
+    }
+    router.push({
+        name: 'brief-studio',
+        query: {
+            series_title: series,
+            episode_number: String(nextEp),
+            parent_blueprint_id: String(bp.value.id),
+            previous_episodes: JSON.stringify(prev.slice(0, 20)),
+            topic: `${series} Episode ${nextEp}`,
+            format: 'reels_panjang',
+        },
+    });
+}
+
 async function copyText(text) {
     try {
         await navigator.clipboard.writeText(text || '');
@@ -369,6 +402,12 @@ onUnmounted(stopPoll);
                     >
                         Ref Analisa AI #{{ bp.analytics_ai_analysis_id }}
                     </span>
+                    <span
+                        v-if="bp.series_title"
+                        class="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-indigo-950"
+                    >
+                        {{ bp.series_title }}{{ bp.episode_number ? ' · Ep ' + bp.episode_number : '' }}
+                    </span>
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
@@ -386,6 +425,14 @@ onUnmounted(stopPoll);
                 </p>
             </div>
             <div v-if="bp" class="flex flex-wrap items-end gap-2">
+                <button
+                    type="button"
+                    class="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-950 hover:bg-indigo-100"
+                    :disabled="isGenerating"
+                    @click="continueSequel"
+                >
+                    Lanjutkan sequel
+                </button>
                 <div>
                     <label class="block text-[11px] font-semibold uppercase text-slate-500">Tanggal</label>
                     <input v-model="plannedDate" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
