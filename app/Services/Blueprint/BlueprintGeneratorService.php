@@ -137,16 +137,15 @@ class BlueprintGeneratorService
             }
         }
 
-        // Video panjang > ~12 mnt @5s VO terlalu besar untuk 1 respons Gemini — pakai template + expand.
-        $skipGeminiLong = $format === self::FORMAT_REELS_PANJANG && $this->voBeatCount() > 72;
-        $gemini = $skipGeminiLong ? null : $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
+        // Video panjang: Gemini tulis kerangka (~48–72 scene), lalu normalizeLongFormTimeline expand ke beat penuh.
+        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
-        } else {
-            if ($skipGeminiLong) {
-                $this->lastWarning = 'Durasi/beat naskah terlalu panjang untuk 1 generate Gemini penuh — blueprint disusun dari template ilustrasi buku + expand timeline.';
+            if ($format === self::FORMAT_REELS_PANJANG && $this->voBeatCount() > count($gemini['scenes'] ?? [])) {
+                $this->lastWarning = 'AI Gemini menulis kerangka naskah; sistem menyesuaikan ke durasi penuh (visual '.$this->beatSeconds.'s · naskah '.$this->voBeatSeconds.'s).';
             }
+        } else {
             $payload = match ($format) {
                 self::FORMAT_REELS_PANJANG => $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea),
                 self::FORMAT_REELS_TEXT => $this->buildReelsTextTemplate($kit, $cleanTitle, $cleanTopic, $idea),
@@ -493,7 +492,7 @@ class BlueprintGeneratorService
 
         foreach ($models as $model) {
             try {
-                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 120 : 60)
+                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 180 : 60)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
@@ -501,13 +500,14 @@ class BlueprintGeneratorService
                             'contents' => [[
                                 'parts' => [['text' => $prompt]],
                             ]],
-                        'generationConfig' => [
-                            'temperature' => 0.95,
-                            'topP' => 0.95,
-                            'responseMimeType' => 'application/json',
-                        ],
-                    ]
-                );
+                            'generationConfig' => [
+                                'temperature' => 0.95,
+                                'topP' => 0.95,
+                                'maxOutputTokens' => $format === self::FORMAT_REELS_PANJANG ? 8192 : 4096,
+                                'responseMimeType' => 'application/json',
+                            ],
+                        ]
+                    );
 
                 if (! $response->successful()) {
                     $err = data_get($response->json(), 'error.message') ?: ('HTTP '.$response->status());
@@ -680,19 +680,24 @@ PROMPT;
         $totalSec = $this->durationSeconds;
         $visualBeat = $this->beatSeconds;
         $voBeat = $this->voBeatSeconds;
-        $beatCount = min(60, $this->voBeatCount());
+        // Gemini tidak bisa isi 120–720 baris sekaligus — minta kerangka padat, expand di PHP.
+        $fullBeats = $this->voBeatCount();
+        $beatCount = $fullBeats <= 72 ? $fullBeats : 60;
         $minutes = max(1, (int) round($totalSec / 60));
         $preferStock = $this->preferStock
             ? 'Campur: ~40% AI ilustrasi buku + ~40% stock + ~10% black + bumper antar bab.'
             : 'UTAMAKAN AI ilustrasi buku (visual_type "ai") sebagai rangkaian plate seperti buku penjelasan. Sisipkan black jarang + bumper antar bab. Stock hanya jika benar-benar perlu (~10%).';
         $banned = $this->bannedHookPhrasesForPrompt();
         $bookStyle = $this->bookIllustrationStyleGuide();
+        $expandNote = $fullBeats > $beatCount
+            ? "PENTING: tulis tepat ~{$beatCount} scene kerangka berkualitas (bukan {$fullBeats}). Sistem akan men-expand ke timeline {$minutes} mnt penuh."
+            : "Tulis sekitar {$beatCount} scene sesuai durasi.";
 
         return <<<PROMPT
 Kamu adalah penulis MASTER BLUEPRINT VOD psikologi untuk brand "{$kit->name}".
 Durasi target {$totalSec}s (~{$minutes} mnt).
 Beat visual (ganti gambar): {$visualBeat}s · Beat naskah VO: {$voBeat}s.
-Generate sekitar {$beatCount} scene inti (sistem akan menyesuaikan ke timeline penuh).
+{$expandNote}
 {$preferStock}
 
 ===== VISUAL VIDEO PANJANG = RANGKAIAN ILUSTRASI BUKU =====
