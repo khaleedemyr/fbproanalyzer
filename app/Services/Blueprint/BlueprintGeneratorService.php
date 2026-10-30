@@ -2181,21 +2181,29 @@ TXT;
         $contentBeats = max(count($contentIdx), $target - $bumperBeats);
         $alloc = $this->allocateSegmentBeats($segments, $contentIdx, $contentBeats);
 
-        // 1 kalimat VO unik per beat naskah (kalau visual=naskah=10s → tiap 10s beda).
-        // Cap 36/bab supaya Gemini masih kuat; kalau beat > 36, baru 1 kalimat dipakai >1 beat.
+        // Timeline butuh 1 kalimat / beat, tapi Gemini hanya diminta SPINE pendek (cepat).
+        // Sisanya diisi PHP bridge — jangan minta 30+ kalimat/bab (itu yang bikin macet 10+ menit).
         $expandJobs = [];
+        $spineJobs = [];
         foreach ($contentIdx as $i) {
             $beatsHere = max(1, (int) ($alloc[$i] ?? 1));
             $linesNeeded = min(36, max(count($segments[$i]['vo_lines'] ?? []), $beatsHere, 2));
+            $spineNeed = min(8, max(3, count($segments[$i]['vo_lines'] ?? []) + 2));
             $expandJobs[$i] = [
                 'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
                 'need' => $linesNeeded,
                 'seed' => $segments[$i]['vo_lines'] ?? [],
             ];
+            $spineJobs[$i] = [
+                'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
+                'need' => $spineNeed,
+                'seed' => $segments[$i]['vo_lines'] ?? [],
+            ];
         }
 
-        $this->reportProgress(78, 'Menulis naskah berkesinambungan…');
-        $batch = $this->expandAllSectionsNarrationWithGemini($expandJobs, $topic, $coverTheme);
+        $this->reportProgress(78, 'Menulis kerangka naskah (cepat)…');
+        $batch = $this->expandAllSectionsNarrationWithGemini($spineJobs, $topic, $coverTheme);
+        $this->reportProgress(82, 'Melengkapi naskah per beat…');
         $batchNorm = [];
         foreach ($batch as $k => $lines) {
             $batchNorm[Str::upper(trim((string) $k))] = $lines;
@@ -2203,23 +2211,17 @@ TXT;
         foreach ($expandJobs as $i => $job) {
             $key = Str::upper(trim($job['section']));
             $fromBatch = $batchNorm[$key] ?? null;
-            if (is_array($fromBatch) && $fromBatch !== []) {
-                $segments[$i]['vo_lines'] = $this->padNarrationBridge(
-                    $fromBatch,
-                    $job['need'],
-                    $job['section'],
-                    $topic,
-                    $coverTheme
-                );
-            } else {
-                $segments[$i]['vo_lines'] = $this->expandSectionNarration(
-                    $job['seed'],
-                    $job['need'],
-                    $job['section'],
-                    $topic,
-                    $coverTheme
-                );
-            }
+            $seed = is_array($fromBatch) && $fromBatch !== []
+                ? $fromBatch
+                : ($job['seed'] ?? []);
+            // Selalu pad lokal (cepat) ke jumlah beat — tidak menunggu Gemini panjang.
+            $segments[$i]['vo_lines'] = $this->padNarrationBridge(
+                $seed,
+                $job['need'],
+                $job['section'],
+                $topic,
+                $coverTheme
+            );
         }
 
         $out = [];
@@ -2805,6 +2807,17 @@ TXT;
             return [];
         }
 
+        $totalNeed = 0;
+        foreach ($jobs as $job) {
+            $totalNeed += (int) ($job['need'] ?? 0);
+        }
+        // Terlalu berat → skip (pakai seed + PHP). Hindari macet Hostinger.
+        if ($totalNeed > 40) {
+            Log::info('blueprint.narration_expand.skip_heavy', ['total_need' => $totalNeed]);
+
+            return [];
+        }
+
         $model = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
         $vp = $this->voicePerspective;
         $blocks = [];
@@ -2812,36 +2825,33 @@ TXT;
             $seed = $this->splitVoLinesOnly($job['seed'] ?? []);
             $seedTxt = $seed === []
                 ? '(kosong — buat benih baru yang kuat)'
-                : collect($seed)->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
-            $blocks[] = "### {$job['section']} (tepat {$job['need']} kalimat)\nBenih:\n{$seedTxt}";
+                : collect($seed)->take(4)->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
+            $need = min(8, max(3, (int) ($job['need'] ?? 3)));
+            $blocks[] = "### {$job['section']} (tepat {$need} kalimat SPINE)\nBenih:\n{$seedTxt}";
         }
         $blockText = implode("\n\n", $blocks);
 
         $prompt = <<<PROMPT
-Kamu ghostwriter naskah VO video panjang psikologi (Bahasa Indonesia), sudut "{$vp}".
-Serial/topik: {$topic}
+Kamu ghostwriter naskah VO (Bahasa Indonesia), sudut "{$vp}".
+Topik: {$topic}
 Cover: {$coverTheme}
 
 {$blockText}
 
-Tugas: untuk SETIAP bagian, tulis kalimat VO yang NYAMBUNG seperti satu cerita lisan berkelanjutan.
-Antar bagian juga harus nyambung (Hook → Bab1 → Bab2 → Bab3 → Penutup).
-DILARANG:
-- template "Latihan 1 / Poin 2/10 / Catatan 3"
-- loncat tokoh/kasus di tengah bab
-- mengulang kalimat hampir sama
-- fragmen 1–3 kata
-WAJIB: tiap kalimat 8–22 kata, siap dibaca VO.
+Tulis SPINE pendek per bagian (bukan naskah penuh). Kalimat nyambung antar bab.
+DILARANG template "Latihan/Poin/Catatan N". Tiap kalimat 8–18 kata.
 
-JSON SAJA bentuk:
+JSON SAJA:
 {"sections":{"GOLDEN HOOK":["..."],"BAB 1":["..."],"BAB 2":["..."],"BAB 3":["..."],"PENUTUP":["..."]}}
-(hanya key bagian yang diminta; jumlah array = angka "tepat N kalimat")
 PROMPT;
 
         try {
-            Log::info('blueprint.narration_expand.request', ['sections' => count($jobs)]);
-            $response = Http::timeout(70)
-                ->connectTimeout(10)
+            Log::info('blueprint.narration_expand.request', [
+                'sections' => count($jobs),
+                'total_need' => $totalNeed,
+            ]);
+            $response = Http::timeout(28)
+                ->connectTimeout(8)
                 ->withHeaders(['Content-Type' => 'application/json'])
                 ->post(
                     "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
@@ -2849,12 +2859,14 @@ PROMPT;
                         'contents' => [['parts' => [['text' => $prompt]]]],
                         'generationConfig' => [
                             'temperature' => 0.65,
-                            'maxOutputTokens' => 8192,
+                            'maxOutputTokens' => 3072,
                             'responseMimeType' => 'application/json',
                         ],
                     ]
                 );
             if (! $response->successful()) {
+                Log::warning('blueprint.narration_expand.http', ['status' => $response->status()]);
+
                 return [];
             }
             $text = '';

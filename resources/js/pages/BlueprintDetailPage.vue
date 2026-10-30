@@ -347,7 +347,9 @@ onUnmounted(stopPoll);
                     :style="{ width: Math.min(100, Math.max(2, progress.percent || 0)) + '%' }"
                 />
             </div>
-            <p class="mt-2 text-xs text-teal-900/80">Biasanya 15–40 detik. Kalau macet, klik selesaikan.</p>
+            <p class="mt-2 text-xs text-teal-900/80">
+                Biasanya 1–2 menit (AI + expand naskah). Kalau stuck di progress yang sama &gt;3 menit, klik selesaikan / Coba AI lagi.
+            </p>
             <button
                 type="button"
                 class="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
