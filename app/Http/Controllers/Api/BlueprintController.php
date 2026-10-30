@@ -8,6 +8,7 @@ use App\Models\BrandKit;
 use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
 use App\Models\TrendSignal;
+use App\Services\Blueprint\BlueprintExportService;
 use App\Services\Blueprint\BlueprintGeneratorService;
 use App\Support\BlueprintProgress;
 use Illuminate\Http\JsonResponse;
@@ -481,6 +482,33 @@ class BlueprintController extends Controller
             'Content-Type' => 'text/markdown; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
+    }
+
+    /**
+     * Export Word/PDF — full blueprint atau naskah saja.
+     * Query: format=pdf|docx&scope=full|naskah
+     */
+    public function exportDocument(
+        Request $request,
+        ContentBlueprint $blueprint,
+        BlueprintExportService $exporter,
+    ): \Symfony\Component\HttpFoundation\StreamedResponse {
+        abort_unless($blueprint->user_id === $request->user()->id, 403);
+        abort_if($blueprint->status === 'generating', 409, 'Blueprint masih generate.');
+
+        $data = $request->validate([
+            'format' => ['nullable', 'in:pdf,docx'],
+            'scope' => ['nullable', 'in:full,naskah'],
+        ]);
+
+        $kit = $blueprint->brandKit ?? BrandKit::defaultFor($request->user());
+
+        return $exporter->download(
+            $blueprint,
+            $kit,
+            (string) ($data['format'] ?? 'pdf'),
+            (string) ($data['scope'] ?? 'full'),
+        );
     }
 
     /**

@@ -252,7 +252,7 @@ class BlueprintGeneratorService
             );
         }
 
-        $storyConcept = (string) ($payload['story_concept'] ?? '');
+        $storyConcept = $this->ensureFlsrStoryConcept((string) ($payload['story_concept'] ?? ''), $cleanTopic);
         if ($brief && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'brief studio')) {
             $storyConcept .= "\n\n[Brief Studio #{$brief->id}] ".($brief->title ?: 'Resume gabungan Radar×Angle×Analytics');
         } elseif ($analysis && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'analisa ai')) {
@@ -269,7 +269,7 @@ class BlueprintGeneratorService
             'angle_finding_id' => $angleFindingId,
             'title' => $payload['title'],
             'cover_theme' => $payload['cover_theme'],
-            'story_concept' => $storyConcept !== '' ? $storyConcept : ($payload['story_concept'] ?? null),
+            'story_concept' => $storyConcept !== '' ? $storyConcept : null,
             'source_topic' => $cleanTopic,
             'status' => $plannedDate ? 'scheduled' : 'ready',
             'format' => $format,
@@ -1017,6 +1017,14 @@ Setiap scene timecode format "MM:SS - MM:SS" (beat 1 = 00:00 - 00:05, beat 2 = 0
 - DILARANG scene yang cuma visual tanpa naskah.
 - Field "caption" WAJIB terisi (hook + 2–3 kalimat + CTA + hashtag). JANGAN kosong.
 
+===== FRAMEWORK FLSR (WAJIB di setiap blueprint) =====
+Pakai FLSR: Finding → Listing → Sorting → Recreating.
+- Finding: pola/konten yang terbukti kuat di niche (dari riset/radar/analisa).
+- Listing: catat elemen menang (hook, konflik, twist, CTA).
+- Sorting: pilih 1 sudut terkuat yang cocok brand.
+- Recreating: tulis ulang jadi naskah ORI brand ini — jangan copy mentah.
+Cantumkan ringkas di story_concept: "FLSR: ...".
+
 ===== PRIORITAS #1: HOOK (detik 0–5) =====
 - Beat pertama menentukan viral. VO pembuka HARUS on-point, mengejutkan, spesifik.
 - Hook visual + teks on-screen + VO harus SELARAS.
@@ -1027,7 +1035,7 @@ DILARANG KERAS sebagai pembuka VO / teks:
 
 GAYA NASKAH:
 - Klaim tajam / kontradiksi / pengakuan gelap.
-- Beat tengah escalate. Beat akhir punchline + CTA.
+- Beat tengah escalate. Beat akhir punchline + CTA (like/comment/share/subscribe).
 
 ATURAN LAIN:
 - No metrik radar di VO.
@@ -1092,6 +1100,15 @@ Hashtag: {$kit->caption_hashtags}
 Struktur: HOOK → BAB1 → bumper(10s) → BAB2 → bumper(10s) → BAB3 → PENUTUP.
 Bumper visual_type "bumper", vo "", durasi 10 detik.
 Hook = cerita nyata tokoh/kasus (tahun + twist).
+
+===== FRAMEWORK FLSR (WAJIB) =====
+Finding → Listing → Sorting → Recreating:
+- HOOK = Finding (buka dengan pola/kasus yang terbukti menggugah).
+- BAB 1 = Listing elemen pola (apa yang terjadi, detail konkret).
+- BAB 2 = Sorting (bedah mana yang paling berbahaya / paling relevan audiens).
+- BAB 3 = Recreating (adaptasi ke hidup penonton + insight unik brand).
+- PENUTUP = takeaway + WAJIB ucapan sampai jumpa + ajakan subscribe, like, comment, share.
+story_concept wajib diawali ringkas "FLSR: ...".
 
 DILARANG pembuka:
 {$banned}
@@ -1202,6 +1219,12 @@ PROMPT;
             : $this->geminiShortPrompt($kit, $title, $topic, $idea, $radar);
 
         $natural = <<<'EXTRA'
+
+===== FRAMEWORK FLSR (WAJIB) =====
+Finding → Listing → Sorting → Recreating.
+Finding: pola konten terbukti. Listing: elemen menang. Sorting: pilih sudut terkuat. Recreating: naskah ORI brand.
+Cantumkan di story_concept: "FLSR: ...".
+Untuk video panjang, PENUTUP wajib: sampai jumpa + subscribe, like, comment, share.
 
 ===== GAYA BAHASA (WAJIB) =====
 - Bahasa Indonesia lisan natural, seperti ngomong ke kamera — bukan esai kaku.
@@ -1599,7 +1622,7 @@ TXT;
         return [
             'title' => Str::limit($theme, 120, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Reels VO {$this->durationSeconds} dtk (beat {$beat}s). Karakter {$kit->character_name} membongkar: {$theme}.",
+            'story_concept' => "FLSR: Finding→Listing→Sorting→Recreating. Reels VO {$this->durationSeconds} dtk (beat {$beat}s). Karakter {$kit->character_name} membongkar: {$theme}.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical {$kit->aspect_ratio} cinematic graphic design for a video thumbnail. {$char} in a bustling neon-lit Jakarta street at night. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. High contrast, urban cinematic aesthetic, professional film grain, no offensive elements.",
             'caption' => trim($seedVos[0])."\n\nRealitanya, {$theme} sering jadi jebakan yang terasa biasa — sampai kamu sadar biayanya terlalu mahal.\n\nSetuju atau tidak? Tulis di komentar. 👇\n.\n.\n.\n".$hashtags,
@@ -1752,7 +1775,7 @@ TXT;
         return [
             'title' => 'Episode: '.Str::limit($theme, 100, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Master blueprint {$minutes} mnt (visual {$visualBeat}s · naskah {$voBeat}s) tentang {$shortTopic}: rangkaian ilustrasi bergaya buku. Hook → Bab → Penutup + bumper.",
+            'story_concept' => "FLSR: Finding pola viral → Listing elemen → Sorting sudut terkuat → Recreating naskah ORI. Master {$minutes} mnt (visual {$visualBeat}s · naskah {$voBeat}s) tentang {$shortTopic}: Hook→Bab→Penutup+bumper.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. Professional film grain, no offensive elements.",
             'caption' => $caption,
@@ -2400,7 +2423,7 @@ TXT;
                 min(88, $pct),
                 "Menulis naskah berantai: {$job['section']} ({$jobN}/{$jobCount})…"
             );
-            $segments[$i]['vo_lines'] = $this->writeContinuousSectionVo(
+            $lines = $this->writeContinuousSectionVo(
                 $job['seed'] ?? [],
                 (int) $job['need'],
                 (string) $job['section'],
@@ -2408,6 +2431,19 @@ TXT;
                 $coverTheme,
                 $prevTail
             );
+            // Penutup: pastikan ada CTA di seed/lines sebelum masuk timeline.
+            $secKey = Str::upper((string) ($job['section_key'] ?? $job['section'] ?? ''));
+            if (str_contains($secKey, 'PENUTUP') || str_contains($this->normalizeLongFormSection((string) $job['section']), 'PENUTUP')) {
+                $joined = implode(' ', $lines);
+                if (! $this->voHasClosingCta($joined)) {
+                    if ($lines === []) {
+                        $lines = [$this->closingCtaLine($topic)];
+                    } else {
+                        $lines[count($lines) - 1] = $this->closingCtaLine($topic);
+                    }
+                }
+            }
+            $segments[$i]['vo_lines'] = $lines;
             $prevTail = array_slice($segments[$i]['vo_lines'], -4);
         }
 
@@ -2532,7 +2568,7 @@ TXT;
             $out[$idx]['motion_prompt'] = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
         }
 
-        return $out;
+        return $this->ensureLongFormClosingCta($out, $topic, $coverTheme);
     }
 
     /**
@@ -3610,10 +3646,104 @@ PROMPT;
             return "Ada cerita nyata yang membuka pola gelap di balik {$short}, dan {$vp} perlu mendengarnya sampai selesai.";
         }
         if (str_contains($sec, 'PENUTUP')) {
-            return "Ringkasnya: {$vp} jaga bingkai dan batas, bukan sibuk membuktikan diri soal {$short}.";
+            return $this->closingCtaLine($short);
         }
 
         return "Dari sini {$vp} bedah bagaimana {$short} bekerja diam-diam dalam percakapan sehari-hari.";
+    }
+
+    protected function ensureFlsrStoryConcept(string $concept, string $topic = ''): string
+    {
+        $concept = trim($concept);
+        if ($concept !== '' && preg_match('/\bFLSR\b/i', $concept)) {
+            return $concept;
+        }
+        $prefix = 'FLSR: Finding pola terbukti → Listing elemen → Sorting sudut terkuat → Recreating naskah ORI'
+            .($topic !== '' ? " soal {$topic}" : '')
+            .'.';
+
+        return $concept === '' ? $prefix : $prefix.' '.$concept;
+    }
+
+    /**
+     * Naskah penutup wajib: sampai jumpa + CTA engage.
+     */
+    protected function closingCtaLine(string $topic = ''): string
+    {
+        $vp = $this->voicePerspective;
+        $bit = $topic !== '' ? " soal {$topic}" : '';
+
+        return "Simpan insight ini{$bit}. Terima kasih sudah menonton — sampai jumpa di video berikutnya. "
+            ."Kalau bermanfaat, {$vp} ajak subscribe, like, comment, dan share ke orang yang butuh dengar ini.";
+    }
+
+    protected function voHasClosingCta(string $vo): bool
+    {
+        $l = Str::lower($vo);
+
+        return str_contains($l, 'sampai jumpa')
+            && (str_contains($l, 'subscribe') || str_contains($l, 'langganan'))
+            && (str_contains($l, 'like') || str_contains($l, 'suka'))
+            && (str_contains($l, 'comment') || str_contains($l, 'komentar'))
+            && (str_contains($l, 'share') || str_contains($l, 'bagikan'));
+    }
+
+    /**
+     * Pastikan PENUTUP video panjang punya CTA engage di beat terakhir.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function ensureLongFormClosingCta(array $rows, string $topic, string $coverTheme): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $lastIdx = null;
+        foreach ($rows as $i => $row) {
+            $type = Str::lower((string) ($row['visual_type'] ?? 'ai'));
+            if (in_array($type, ['bumper', 'black'], true)) {
+                continue;
+            }
+            $sec = Str::upper((string) ($row['section'] ?? ''));
+            if (str_contains($sec, 'PENUTUP') || str_contains($this->normalizeLongFormSection($sec), 'PENUTUP')) {
+                $lastIdx = $i;
+            }
+        }
+
+        // Fallback: beat konten terakhir.
+        if ($lastIdx === null) {
+            for ($i = count($rows) - 1; $i >= 0; $i--) {
+                $type = Str::lower((string) ($rows[$i]['visual_type'] ?? 'ai'));
+                if (! in_array($type, ['bumper', 'black'], true)) {
+                    $lastIdx = $i;
+                    break;
+                }
+            }
+        }
+
+        if ($lastIdx === null) {
+            return $rows;
+        }
+
+        $joined = '';
+        foreach ($rows as $row) {
+            $sec = Str::upper((string) ($row['section'] ?? ''));
+            if (str_contains($sec, 'PENUTUP') || str_contains($this->normalizeLongFormSection($sec), 'PENUTUP')) {
+                $joined .= ' '.(string) ($row['vo'] ?? '');
+            }
+        }
+        if ($this->voHasClosingCta($joined.' '.(string) ($rows[$lastIdx]['vo'] ?? ''))) {
+            return $rows;
+        }
+
+        $cta = $this->fitVoToBeat($this->closingCtaLine(Str::limit($topic, 40, '')), $topic, 'PENUTUP');
+        $rows[$lastIdx]['vo'] = $cta;
+        $rows[$lastIdx]['on_screen'] = $this->onScreenFromVo($cta, 'SAMPAI JUMPA', $coverTheme, true);
+        $rows[$lastIdx]['section'] = (string) ($rows[$lastIdx]['section'] ?? 'PENUTUP');
+
+        return $rows;
     }
 
     /**

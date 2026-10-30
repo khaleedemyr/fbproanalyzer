@@ -341,6 +341,37 @@ async function copyMasterPrompt() {
     }
 }
 
+async function exportDocument(format, scope = 'full') {
+    if (!bp.value?.id || isGenerating.value) return;
+    try {
+        const { data } = await http.get(`/blueprints/${bp.value.id}/export-document`, {
+            params: { format, scope },
+            responseType: 'blob',
+            timeout: 120000,
+        });
+        const slug = (bp.value.cover_theme || bp.value.title || 'blueprint')
+            .toString()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/gi, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 50) || 'blueprint';
+        const suffix = scope === 'naskah' ? '-naskah' : '';
+        const url = URL.createObjectURL(data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `blueprint-${slug}${suffix}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        message.value = scope === 'naskah'
+            ? `Naskah diunduh (${format.toUpperCase()}).`
+            : `Blueprint lengkap diunduh (${format.toUpperCase()}).`;
+    } catch (e) {
+        error.value = e.response?.data?.message || `Gagal export ${format.toUpperCase()}.`;
+    }
+}
+
 onMounted(load);
 onUnmounted(stopPoll);
 </script>
@@ -473,6 +504,40 @@ onUnmounted(stopPoll);
                     @click="copyMasterPrompt"
                 >
                     Copy prompt AI lain
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800"
+                    :disabled="isGenerating"
+                    @click="exportDocument('docx', 'full')"
+                >
+                    Word lengkap
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800"
+                    :disabled="isGenerating"
+                    @click="exportDocument('pdf', 'full')"
+                >
+                    PDF lengkap
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-950"
+                    :disabled="isGenerating"
+                    title="Hanya naskah VO + timecode"
+                    @click="exportDocument('docx', 'naskah')"
+                >
+                    Word naskah
+                </button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-950"
+                    :disabled="isGenerating"
+                    title="Hanya naskah VO + timecode"
+                    @click="exportDocument('pdf', 'naskah')"
+                >
+                    PDF naskah
                 </button>
                 <button type="button" class="rounded-lg px-3 py-2 text-sm text-red-600" @click="removeItem">Hapus</button>
             </div>

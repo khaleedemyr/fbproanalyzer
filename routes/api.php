@@ -92,4 +92,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('blueprints/{blueprint}', [BlueprintController::class, 'update']);
     Route::delete('blueprints/{blueprint}', [BlueprintController::class, 'destroy']);
     Route::get('blueprints/{blueprint}/export', [BlueprintController::class, 'export']);
+    Route::get('blueprints/{blueprint}/export-document', [BlueprintController::class, 'exportDocument']);
 });
