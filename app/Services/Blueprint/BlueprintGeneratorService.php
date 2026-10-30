@@ -1136,21 +1136,18 @@ PROMPT;
 
         if (count($words) < $t['min']) {
             // Pad unik dari hash kalimat — jangan selalu nempel filler yang sama.
-            $seed = abs(crc32($vo.'|'.$section.'|'.$topic));
+            // Panjangin adegan yang sama — jangan nempel tip baru (bikin putus cerita).
+            $core = Str::limit($vo, 70, '');
             $fillers = [
-                "Detail kecil ini sering {$vp} lewati, padahal di situlah bingkai digeser.",
-                "Diam sebentar lebih aman daripada langsung membela diri.",
-                "Siapa yang paling tenang di momen ini biasanya yang memegang kendali.",
-                "Rasa wajib menolong sering datang duluan sebelum {$vp} sempat berpikir.",
-                "Kalau urutannya diulang pelan, motifnya tidak lagi terasa samar.",
-                "Jangan buru menyimpulkan — amati dulu siapa yang diuntungkan.",
-                "Satu pertanyaan balik sering lebih kuat dari sepuluh kalimat penjelasan.",
-                "Penjaga {$vp} naik di sini, bukan turun karena rasa iba.",
+                "{$vp} merasakan dampaknya langsung di detik itu.",
+                'Momen ini belum selesai; detail berikutnya semakin jelas.',
+                'Apa yang baru terjadi masih satu adegan yang sama.',
+                "Alurnya terus jalan dari titik tadi, tanpa loncat topik.",
             ];
+            $seed = abs(crc32($core.'|'.$section));
             $i = 0;
-            while (count($words) < $t['min'] && $i < 12) {
-                $extra = $fillers[($seed + $i) % count($fillers)];
-                $vo = rtrim($vo, " \t.").'. '.$extra;
+            while (count($words) < $t['min'] && $i < 8) {
+                $vo = rtrim($vo, " \t.").'. '.$fillers[($seed + $i) % count($fillers)];
                 $words = preg_split('/\s+/u', $vo) ?: [];
                 $i++;
             }
@@ -2310,15 +2307,12 @@ TXT;
         $contentBeats = max(count($contentIdx), $target - $bumperBeats);
         $alloc = $this->allocateSegmentBeats($segments, $contentIdx, $contentBeats);
 
-        // Timeline butuh 1 kalimat / beat, tapi Gemini hanya diminta SPINE pendek (cepat).
-        // Sisanya diisi PHP bridge — jangan minta 30+ kalimat/bab (itu yang bikin macet 10+ menit).
+        // Naskah berantai per bab (Gemini chunk + konteks kalimat sebelumnya).
+        // Jangan isi tip generik PHP — itu yang bikin "ga nyambung".
         $expandJobs = [];
-        $spineJobs = [];
         foreach ($contentIdx as $i) {
             $beatsHere = max(1, (int) ($alloc[$i] ?? 1));
-            // 1 kalimat unik per beat naskah (jangan cap ketat — itu bikin VO kembar tiap 10s).
             $linesNeeded = min(180, max(count($segments[$i]['vo_lines'] ?? []), $beatsHere, 2));
-            $spineNeed = min(10, max(3, count($segments[$i]['vo_lines'] ?? []) + 2));
             $sectionKey = (string) ($segments[$i]['section_key'] ?? $this->normalizeLongFormSection((string) ($segments[$i]['section'] ?? 'BAB')));
             $expandJobs[$i] = [
                 'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
@@ -2326,35 +2320,27 @@ TXT;
                 'need' => $linesNeeded,
                 'seed' => $segments[$i]['vo_lines'] ?? [],
             ];
-            $spineJobs[$i] = [
-                'section' => $sectionKey,
-                'need' => $spineNeed,
-                'seed' => $segments[$i]['vo_lines'] ?? [],
-            ];
         }
 
-        $this->reportProgress(78, 'Menulis kerangka naskah (cepat)…');
-        $batch = $this->expandAllSectionsNarrationWithGemini($spineJobs, $topic, $coverTheme);
-        $this->reportProgress(82, 'Melengkapi naskah per beat…');
-        $batchNorm = [];
-        foreach ($batch as $k => $lines) {
-            $batchNorm[$this->normalizeLongFormSection((string) $k)] = $lines;
-            $batchNorm[Str::upper(trim((string) $k))] = $lines;
-        }
+        $prevTail = [];
+        $jobCount = max(1, count($expandJobs));
+        $jobN = 0;
         foreach ($expandJobs as $i => $job) {
-            $key = (string) ($job['section_key'] ?? $this->normalizeLongFormSection($job['section']));
-            $fromBatch = $batchNorm[$key] ?? $batchNorm[Str::upper($key)] ?? null;
-            $seed = is_array($fromBatch) && $fromBatch !== []
-                ? $fromBatch
-                : ($job['seed'] ?? []);
-            // Selalu pad lokal (cepat) ke jumlah beat — tidak menunggu Gemini panjang.
-            $segments[$i]['vo_lines'] = $this->padNarrationBridge(
-                $seed,
-                $job['need'],
-                $job['section'],
-                $topic,
-                $coverTheme
+            $jobN++;
+            $pct = 78 + (int) floor(($jobN / $jobCount) * 10);
+            $this->reportProgress(
+                min(88, $pct),
+                "Menulis naskah berantai: {$job['section']} ({$jobN}/{$jobCount})…"
             );
+            $segments[$i]['vo_lines'] = $this->writeContinuousSectionVo(
+                $job['seed'] ?? [],
+                (int) $job['need'],
+                (string) $job['section'],
+                $topic,
+                $coverTheme,
+                $prevTail
+            );
+            $prevTail = array_slice($segments[$i]['vo_lines'], -4);
         }
 
         $out = [];
@@ -2525,7 +2511,7 @@ TXT;
     }
 
     /**
-     * Satu kalimat VO unik per beat — maju cerita, bukan bridge generik yang diputar ulang.
+     * Lanjutkan ADEGAN yang sama dari kalimat sebelumnya (fallback PHP, bukan tip bank).
      *
      * @param  list<string>  $usedFingerprints
      */
@@ -2537,81 +2523,48 @@ TXT;
         int $beatIndex,
         array $usedFingerprints,
     ): string {
+        return $this->continueSameSceneLine($prevVo, $topic, $coverTheme, $beatIndex, $usedFingerprints);
+    }
+
+    /**
+     * @param  list<string>  $usedFingerprints
+     */
+    protected function continueSameSceneLine(
+        string $prevVo,
+        string $topic,
+        string $coverTheme,
+        int $beatIndex,
+        array $usedFingerprints,
+    ): string {
         $vp = $this->voicePerspective;
         $prev = $this->sanitizeSpokenVo($prevVo);
-        $clip = Str::limit($this->voFingerprint($prev), 36, '');
+        $clip = Str::limit(trim($prev), 48, '');
+        if ($clip === '') {
+            $clip = Str::limit($topic, 40, '');
+        }
         $shortTopic = Str::limit($topic, 36, '');
-        $theme = Str::limit($coverTheme, 36, '');
         $idx = max(1, $beatIndex);
-        $phase = $idx % 6; // setup / contoh / tegangan / ungkap / peringatan / takeaway
-        $salt = abs(crc32($section.'|'.$shortTopic.'|'.$idx.'|'.$clip));
-
-        $openers = [
-            "Di lapisan ke-{$idx},",
-            'Lalu muncul detail baru:',
-            'Coba bayangkan situasinya:',
-            'Yang sering terlewat:',
-            'Di percakapan nyata,',
-            'Begitu tekanan naik,',
-            "Tanpa {$vp} sadari,",
-            'Dalam hitungan detik,',
-            'Setelah momen itu,',
-            "Kalau {$vp} amati ulang,",
-        ];
-
-        $cores = [
-            "kerapuhan dipamerkan dulu supaya empati {$vp} terbuka",
-            "rasa bersalah ditanam pelan sampai {$vp} merasa berhutang",
-            "permintaan kecil datang bertahap, seolah wajar",
-            "bingkai digeser: {$vp} yang salah kalau menolak",
-            "kelembutan dipakai menutupi kontrol",
-            "{$vp} didorong menjelaskan diri, lawan justru tenang",
-            "batas {$vp} diuji lewat air mata atau nada lemah",
-            "narasi diputar: menolong = bukti cinta",
-            "diam {$vp} dibaca sebagai izin",
-            "pola {$shortTopic} bekerja lewat kebiasaan, bukan ledakan",
-            "siapa yang panik menjelaskan biasanya yang sedang dikondisikan",
-            "motif tersembunyi baru kebaca kalau kronologinya diurutkan",
-            "empati tanpa batas jadi pintu masuk kendali",
-            "satu kalimat manis bisa mengunci keputusan {$vp} semalaman",
-            "{$theme} terasa familiar justru karena polanya berulang",
-        ];
-
-        $tails = [
-            "— dan {$vp} belum sempat menamai polanya.",
-            "— di situlah kendali mulai berpindah.",
-            "— bukan karena {$vp} lemah, tapi karena umpannya tepat.",
-            "— penjaga {$vp} seharusnya naik di titik ini.",
-            "— jangan buru bereaksi sebelum motifnya jelas.",
-            "— simpan ini sebelum masuk contoh berikutnya.",
-            "— satu napas dulu, baru jawab.",
-            "— pertanyaan balik lebih aman daripada pembelaan panjang.",
-            $clip !== '' ? "— ingat potongan tadi: \"{$clip}\"." : "— hubungkan ke apa yang baru saja terjadi.",
-            "— ini masih satu cerita tentang {$shortTopic}.",
-        ];
-
-        $byPhase = match ($phase) {
-            1 => "Contohnya: seseorang tampak rapuh, lalu {$vp} merasa wajib menolong tanpa ditanya.",
-            2 => "Tegangannya naik saat {$vp} mulai ragu pada intuisi sendiri soal {$shortTopic}.",
-            3 => "Yang terbongkar: kelembutan itu mengatur siapa yang boleh marah dan siapa yang harus diam.",
-            4 => "Peringatan untuk {$vp}: kalau rasa iba datang duluan, cek dulu siapa yang diuntungkan.",
-            5 => "Ambil ini: jaga bingkai. {$vp} boleh peduli tanpa menyerahkan kendali.",
-            default => "Setup-nya sederhana: {$shortTopic} jarang datang sebagai serangan terang — ia datang sebagai kepedulian.",
-        };
+        $salt = abs(crc32($clip.'|'.$idx.'|'.$coverTheme));
 
         $candidates = [
-            trim($openers[$salt % count($openers)].' '.$cores[($salt + $idx) % count($cores)].' '.$tails[($salt + 3) % count($tails)]),
-            $byPhase,
-            $clip !== ''
-                ? "Dari \"{$clip}\", loncatannya jelas: {$cores[($salt + 5) % count($cores)]}."
-                : "Loncatan berikutnya: {$cores[($salt + 5) % count($cores)]}.",
-            "Di titik ini soal {$shortTopic}: {$cores[($idx * 3) % count($cores)]} — {$vp} wajib sadar sebelum bereaksi.",
-            "Bukan kebetulan: {$cores[($salt + 7) % count($cores)]} ".$tails[($idx + 2) % count($tails)],
+            "Lalu, dari \"{$clip}\", {$vp} melihat akibatnya langsung: tekanan naik tanpa teriakan.",
+            "Belum selesai di situ — setelah \"{$clip}\", pilihan {$vp} makin sempit.",
+            "Detik berikutnya masih satu adegan: \"{$clip}\" membuat {$vp} ragu pada intuisi sendiri.",
+            "Dari momen \"{$clip}\", orang di seberang justru semakin tenang sementara {$vp} goyah.",
+            "Cerita soal {$shortTopic} lanjut dari tadi: \"{$clip}\" bukan penutup, tapi pintu ke lapisan berikutnya.",
+            "{$vp} masih di adegan yang sama setelah \"{$clip}\" — belum ada loncat ke tips lain.",
+            "Apa yang terjadi setelah \"{$clip}\"? {$vp} mulai merasakan biaya emosionalnya.",
+            "Urutannya jelas: \"{$clip}\", lalu {$vp} didorong menjelaskan diri.",
         ];
 
-        foreach ($candidates as $try) {
+        // Putar urutan pakai salt supaya tidak selalu baris pertama.
+        $ordered = [];
+        for ($i = 0; $i < count($candidates); $i++) {
+            $ordered[] = $candidates[($salt + $i) % count($candidates)];
+        }
+
+        foreach ($ordered as $try) {
             $try = trim(preg_replace('/\s+/u', ' ', $try) ?? $try);
-            $try = preg_replace('/\bBeat\s+\d+\s+soal\b/iu', 'Di titik ini soal', $try) ?? $try;
             if ($this->looksLikeMetaVo($try) || $this->looksLikeGenericBridge($try)) {
                 continue;
             }
@@ -2619,7 +2572,7 @@ TXT;
             $clash = false;
             foreach ($usedFingerprints as $u) {
                 similar_text($fp, (string) $u, $pct);
-                if ($pct >= 68) {
+                if ($pct >= 70) {
                     $clash = true;
                     break;
                 }
@@ -2629,8 +2582,7 @@ TXT;
             }
         }
 
-        // Fallback terakhir: tetap unik lewat indeks + salt, tanpa frasa generik.
-        return "Di detik ini {$vp} diuji: apakah {$shortTopic} membuat {$vp} menyerahkan batas, atau justru menegaskannya — lapisan {$idx}.";
+        return "Setelah \"{$clip}\", {$vp} masih dalam satu cerita tentang {$shortTopic} — lapisan {$idx} belum selesai.";
     }
 
     protected function looksLikeGenericBridge(string $line): bool
@@ -2638,9 +2590,199 @@ TXT;
         $l = Str::lower($line);
 
         return (bool) preg_match(
-            '/dari situ\b.*\b(melihat|lihat)\b.*\bpola|melihat polanya di\b|mulai melihat polanya\b|lanjut benang\b|uji satu situasi\b/iu',
+            '/dari situ\b.*\b(melihat|lihat)\b.*\bpola|melihat polanya di\b|mulai melihat polanya\b|lanjut benang\b|uji satu situasi\b|coba bayangkan situasinya\b|simpan ini sebelum\b|pertanyaan balik lebih aman\b|siapa yang paling tenang di momen ini\b|di lapisan ke-\d+|di percakapan nyata,\s*batas/iu',
             $l
         );
+    }
+
+    /**
+     * Tulis naskah satu bab secara berantai (Gemini chunk + konteks).
+     *
+     * @param  list<string>  $seed
+     * @param  list<string>  $prevTail
+     * @return list<string>
+     */
+    protected function writeContinuousSectionVo(
+        array $seed,
+        int $need,
+        string $section,
+        string $topic,
+        string $coverTheme,
+        array $prevTail = [],
+    ): array {
+        $need = max(1, $need);
+        $seed = array_values(array_filter(array_map(
+            fn ($l) => $this->sanitizeSpokenVo((string) $l),
+            $this->splitVoLinesOnly($seed)
+        ), fn ($l) => $l !== '' && ! $this->looksLikeMetaVo($l) && ! $this->looksLikeGenericBridge($l)));
+
+        if ($seed === []) {
+            $seed = [$this->sectionSeedLine($section, $topic, $coverTheme)];
+        }
+
+        $out = [];
+        $usedFp = [];
+        foreach ($seed as $line) {
+            if (count($out) >= $need) {
+                break;
+            }
+            $fitted = $this->fitVoToBeat($line, $topic, $section);
+            if ($this->looksLikeMetaVo($fitted) || $this->looksLikeGenericBridge($fitted) || $this->voTooSimilarToAny($fitted, $out)) {
+                continue;
+            }
+            $out[] = $fitted;
+            $usedFp[] = $this->voFingerprint($fitted);
+        }
+
+        $chunkSize = 8;
+        $maxCalls = 6;
+        $calls = 0;
+        while (count($out) < $need && $calls < $maxCalls) {
+            $want = min($chunkSize, $need - count($out));
+            $context = array_slice(array_merge($prevTail, $out), -5);
+            $chunk = $this->expandNarrationChunkWithGemini(
+                $context,
+                $seed,
+                $want,
+                $section,
+                $topic,
+                $coverTheme
+            );
+            $calls++;
+            if ($chunk === []) {
+                break;
+            }
+            $added = 0;
+            foreach ($chunk as $line) {
+                if (count($out) >= $need) {
+                    break;
+                }
+                $fitted = $this->fitVoToBeat($this->sanitizeSpokenVo($line), $topic, $section);
+                if (
+                    $fitted === ''
+                    || $this->looksLikeMetaVo($fitted)
+                    || $this->looksLikeGenericBridge($fitted)
+                    || $this->voTooSimilarToAny($fitted, $out)
+                ) {
+                    continue;
+                }
+                $out[] = $fitted;
+                $usedFp[] = $this->voFingerprint($fitted);
+                $added++;
+            }
+            if ($added === 0) {
+                break;
+            }
+        }
+
+        return $this->padNarrationBridge($out, $need, $section, $topic, $coverTheme);
+    }
+
+    /**
+     * Satu chunk naskah lanjutan (cerita maju dari konteks).
+     *
+     * @param  list<string>  $context
+     * @param  list<string>  $seed
+     * @return list<string>
+     */
+    protected function expandNarrationChunkWithGemini(
+        array $context,
+        array $seed,
+        int $want,
+        string $section,
+        string $topic,
+        string $coverTheme,
+    ): array {
+        $apiKey = trim((string) config('blueprint.gemini_api_key', ''), " \t\n\r\0\x0B\"'");
+        if ($apiKey === '' || $want < 1) {
+            return [];
+        }
+
+        $model = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
+        $vp = $this->voicePerspective;
+        $voWords = $this->targetVoWords();
+        $voMin = $voWords['min'];
+        $voMax = $voWords['max'];
+        $voBeatSec = $this->voBeatSeconds;
+        $want = min(10, max(1, $want));
+
+        $ctxTxt = $context === []
+            ? '(belum ada — mulai dari benih)'
+            : collect($context)->values()->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
+        $seedTxt = collect($seed)->take(6)->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
+
+        $prompt = <<<PROMPT
+Kamu ghostwriter naskah VO Reels (Bahasa Indonesia), sudut "{$vp}".
+Topik: {$topic}
+Cover/tema: {$coverTheme}
+Bagian: {$section}
+
+BENIH CERITA (wajib diikuti — tokoh/peristiwa/pola di sini):
+{$seedTxt}
+
+KALIMAT SEBELUMNYA (lanjutkan dari sini, jangan mengulang):
+{$ctxTxt}
+
+Tulis TEPAT {$want} kalimat berikutnya.
+Aturan ketat:
+- Ini CERITA / kronologi yang maju (sebab→akibat / adegan→adegan), BUKAN tips generik.
+- Satu kalimat = satu beat ±{$voBeatSec}s ({$voMin}-{$voMax} kata).
+- Pakai tokoh/peristiwa dari benih kalau ada (jangan ganti jadi tips abstrak).
+- DILARANG: "Coba bayangkan situasinya", "simpan ini sebelum", "Dari situ melihat polanya", "Lanjut benang", "pertanyaan balik lebih aman", label BAB/HOOK, Poin/Latihan N.
+- Jangan loncat ke tip baru yang tidak nyambung dengan kalimat sebelumnya.
+
+JSON SAJA: {"lines":["..."]}
+PROMPT;
+
+        try {
+            Log::info('blueprint.narration_chunk.request', [
+                'section' => $section,
+                'want' => $want,
+                'context' => count($context),
+            ]);
+            $response = Http::timeout(32)
+                ->connectTimeout(8)
+                ->withHeaders(['Content-Type' => 'application/json'])
+                ->post(
+                    "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",
+                    [
+                        'contents' => [['parts' => [['text' => $prompt]]]],
+                        'generationConfig' => [
+                            'temperature' => 0.7,
+                            'maxOutputTokens' => 2048,
+                            'responseMimeType' => 'application/json',
+                        ],
+                    ]
+                );
+            if (! $response->successful()) {
+                Log::warning('blueprint.narration_chunk.http', ['status' => $response->status()]);
+
+                return [];
+            }
+            $text = '';
+            foreach ((array) data_get($response->json(), 'candidates.0.content.parts', []) as $part) {
+                if (is_array($part) && isset($part['text'])) {
+                    $text .= (string) $part['text'];
+                }
+            }
+            $decoded = $this->decodeGeminiBlueprintJson($text);
+            $lines = $decoded['lines'] ?? null;
+            if (! is_array($lines)) {
+                return [];
+            }
+            $clean = $this->splitVoLinesOnly(array_map('strval', $lines));
+            $clean = array_values(array_filter(
+                $clean,
+                fn ($l) => ! $this->looksLikeMetaVo($l) && ! $this->looksLikeGenericBridge($l)
+            ));
+            Log::info('blueprint.narration_chunk.ok', ['section' => $section, 'n' => count($clean)]);
+
+            return $clean;
+        } catch (\Throwable $e) {
+            Log::warning('blueprint.narration_chunk_fail', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /**
@@ -3058,22 +3200,7 @@ TXT;
         string $topic,
         string $coverTheme,
     ): array {
-        $need = max(1, $need);
-        $seed = $this->splitVoLinesOnly($seed);
-        if ($seed === []) {
-            $seed = [$this->sectionSeedLine($section, $topic, $coverTheme)];
-        }
-
-        if (count($seed) >= $need) {
-            return array_slice($seed, 0, $need);
-        }
-
-        $gemini = $this->expandNarrationWithGemini($seed, $need, $section, $topic);
-        if ($gemini !== null && count($gemini) >= min($need, 3)) {
-            return $this->padNarrationBridge($gemini, $need, $section, $topic, $coverTheme);
-        }
-
-        return $this->padNarrationBridge($seed, $need, $section, $topic, $coverTheme);
+        return $this->writeContinuousSectionVo($seed, $need, $section, $topic, $coverTheme, []);
     }
 
     /**
@@ -3258,17 +3385,16 @@ PROMPT;
             $guard++;
         }
 
-        // Safety: kalau masih kurang (sangat jarang), isi dengan fallback berindeks unik.
+        // Safety: lanjut adegan yang sama (bukan tip baru).
         while (count($out) < $need) {
-            $n = count($out) + 1;
-            $vp = $this->voicePerspective;
-            $short = Str::limit($topic, 40, '');
+            $prev = $out !== [] ? $out[count($out) - 1] : ($lines[0] ?? $topic);
             $line = $this->fitVoToBeat(
-                "Di detik ke-{$n}, {$vp} diuji soal {$short}: jaga batas, atau ikut bingkai yang digeser diam-diam.",
+                $this->continueSameSceneLine($prev, $topic, $coverTheme, count($out) + 1, $usedFp),
                 $topic,
                 $section
             );
             $out[] = $line;
+            $usedFp[] = $this->voFingerprint($line);
         }
 
         return array_slice($out, 0, $need);
