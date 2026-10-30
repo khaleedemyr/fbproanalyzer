@@ -808,15 +808,25 @@ class BlueprintGeneratorService
 
         $errors = [];
 
+        // Konteks riset (brief+sequel+analisa) sering kebanyakan → JSON output terpotong.
+        if ($format === self::FORMAT_REELS_PANJANG && strlen($radarContext) > 2800) {
+            $radarContext = Str::limit($radarContext, 2800, "\n…(dipotong)");
+            $prompt = match ($format) {
+                self::FORMAT_REELS_PANJANG => $this->geminiLongPrompt($kit, $title, $topic, $idea, $radarContext),
+                default => $prompt,
+            };
+        }
+
         foreach ($models as $model) {
             try {
-                // Outline padat: target <40s. CLI boleh lebih longgar.
-                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 55 : 45;
-                $maxTokens = $format === self::FORMAT_REELS_PANJANG ? 4096 : 4096;
+                // CLI/background: timeout & token lebih longgar supaya JSON tidak terpotong.
+                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 90 : 45;
+                $maxTokens = $format === self::FORMAT_REELS_PANJANG ? 8192 : 4096;
                 Log::info('blueprint.gemini.request', [
                     'model' => $model,
                     'format' => $format,
                     'timeout' => $httpTimeout,
+                    'max_tokens' => $maxTokens,
                     'prompt_chars' => strlen($prompt),
                 ]);
                 $started = microtime(true);
@@ -830,17 +840,19 @@ class BlueprintGeneratorService
                                 'parts' => [['text' => $prompt]],
                             ]],
                             'generationConfig' => [
-                                'temperature' => 0.9,
-                                'topP' => 0.95,
+                                'temperature' => 0.75,
+                                'topP' => 0.9,
                                 'maxOutputTokens' => $maxTokens,
                                 'responseMimeType' => 'application/json',
                             ],
                         ]
                     );
+                $finishReason = (string) data_get($response->json(), 'candidates.0.finishReason', '');
                 Log::info('blueprint.gemini.response', [
                     'model' => $model,
                     'status' => $response->status(),
                     'seconds' => round(microtime(true) - $started, 2),
+                    'finish_reason' => $finishReason,
                 ]);
 
                 if (! $response->successful()) {
@@ -850,24 +862,39 @@ class BlueprintGeneratorService
                     continue;
                 }
 
-                $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
-                if (! is_string($text) || $text === '') {
-                    $block = data_get($response->json(), 'candidates.0.finishReason')
+                // Gabung semua parts (kadang teks pecah).
+                $parts = data_get($response->json(), 'candidates.0.content.parts', []);
+                $text = '';
+                if (is_array($parts)) {
+                    foreach ($parts as $part) {
+                        if (is_array($part) && isset($part['text']) && is_string($part['text'])) {
+                            $text .= $part['text'];
+                        }
+                    }
+                }
+                if ($text === '') {
+                    $text = (string) data_get($response->json(), 'candidates.0.content.parts.0.text', '');
+                }
+                if ($text === '') {
+                    $block = $finishReason
                         ?: data_get($response->json(), 'promptFeedback.blockReason');
                     $errors[] = "{$model}: respons kosong".($block ? " ({$block})" : '');
 
                     continue;
                 }
 
-                // Kadang model bungkus JSON di markdown fence.
-                $jsonText = trim($text);
-                if (preg_match('/```(?:json)?\s*([\s\S]*?)```/i', $jsonText, $m)) {
-                    $jsonText = trim($m[1]);
-                }
-
-                $decoded = json_decode($jsonText, true);
+                $decoded = $this->decodeGeminiBlueprintJson($text);
                 if (! is_array($decoded)) {
-                    $errors[] = "{$model}: JSON blueprint tidak valid";
+                    Log::warning('blueprint.gemini.json_invalid', [
+                        'model' => $model,
+                        'finish_reason' => $finishReason,
+                        'json_error' => json_last_error_msg(),
+                        'snippet' => Str::limit(preg_replace('/\s+/', ' ', $text) ?? $text, 400),
+                    ]);
+                    $why = $finishReason === 'MAX_TOKENS'
+                        ? 'JSON terpotong (MAX_TOKENS)'
+                        : 'JSON blueprint tidak valid';
+                    $errors[] = "{$model}: {$why}";
 
                     continue;
                 }
@@ -1014,10 +1041,10 @@ PROMPT;
         $totalSec = $this->durationSeconds;
         $visualBeat = $this->beatSeconds;
         $voBeat = $this->voBeatSeconds;
-        // Hostinger bunuh request kalau minta puluhan scene. Minta kerangka bab padat; expand di PHP.
+        // Kerangka sangat padat — JSON panjang sering MAX_TOKENS / invalid; expand di PHP.
         $fullBeats = $this->voBeatCount();
         $minutes = max(1, (int) round($totalSec / 60));
-        $beatCount = min(14, max(10, 8 + (int) ceil($minutes / 10)));
+        $beatCount = min(8, max(6, 5 + (int) ceil($minutes / 15)));
         $preferStock = $this->preferStock
             ? 'Campur AI ilustrasi buku + stock jarang + bumper antar bab.'
             : 'UTAMAKAN visual_type "ai" ilustrasi buku. Bumper hanya antar bab.';
@@ -1025,16 +1052,19 @@ PROMPT;
         $bookStyle = $this->bookIllustrationStyleGuide();
 
         return <<<PROMPT
-Kamu menulis KERANGKA padat VOD psikologi untuk "{$kit->name}" (~{$minutes} mnt / {$totalSec}s).
-Beat visual {$visualBeat}s · beat naskah {$voBeat}s · timeline penuh ~{$fullBeats} baris akan di-expand sistem dari kerangkamu.
+Kamu menulis KERANGKA RINGKAS VOD psikologi untuk "{$kit->name}" (~{$minutes} mnt).
+Beat visual {$visualBeat}s · naskah {$voBeat}s · sistem expand ke ~{$fullBeats} baris.
 {$preferStock}
 
-WAJIB: tepat {$beatCount} scene kerangka SAJA (bukan {$fullBeats}). Tiap scene VO = 1–2 kalimat tajam (bukan paragraf).
+WAJIB: tepat {$beatCount} scene SAJA. JSON harus lengkap & valid (jangan potong di tengah).
+Field pendek:
+- vo: 1 kalimat saja
+- on_screen: max 6 kata
+- image_prompt: 1 kalimat metafora buku (bukan paragraf)
+- motion_prompt: "slow Ken Burns"
 
-Style image_prompt:
-{$bookStyle}
-- image_prompt = metafora dari VO; motion_prompt = slow Ken Burns.
-- DILARANG stickman tuxedo/bebek; DILARANG wajah fotoreal.
+Style image: {$bookStyle}
+DILARANG stickman tuxedo/bebek; DILARANG wajah fotoreal.
 
 Tema: {$title}
 Topik: {$topic}
@@ -1043,16 +1073,99 @@ Angle: {$angle}
 Sudut VO: "{$this->voicePerspective}"
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
-Struktur scene: GOLDEN HOOK (3) → BAB1 → bumper → BAB2 → bumper → BAB3 → PENUTUP.
-Hook = cerita nyata tokoh/kasus publik (tahun + konflik + twist).
+Struktur: HOOK → BAB1 → bumper → BAB2 → bumper → BAB3 → PENUTUP.
+Hook = cerita nyata tokoh/kasus (tahun + twist).
 
 DILARANG pembuka:
 {$banned}
 
 JSON SAJA keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
 Setiap scene: section, timecode, visual_type, vo, on_screen, image_prompt, motion_prompt.
-Bumper boleh vo "". Scene lain WAJIB vo terisi. caption WAJIB ada.
+Bumper vo "". Scene lain vo terisi. caption WAJIB. JANGAN markdown.
 PROMPT;
+    }
+
+    /**
+     * Decode JSON dari Gemini; perbaiki truncation ringan.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function decodeGeminiBlueprintJson(string $text): ?array
+    {
+        $jsonText = trim($text);
+        if (preg_match('/```(?:json)?\s*([\s\S]*?)```/i', $jsonText, $m)) {
+            $jsonText = trim($m[1]);
+        }
+
+        $start = strpos($jsonText, '{');
+        if ($start === false) {
+            return null;
+        }
+        $jsonText = substr($jsonText, $start);
+
+        $decoded = json_decode($jsonText, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        $repaired = $this->repairTruncatedJson($jsonText);
+        $decoded = json_decode($repaired, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Tutup kutip/kurung yang terbuka bila output Gemini terpotong.
+     */
+    protected function repairTruncatedJson(string $json): string
+    {
+        $json = rtrim($json);
+
+        // Buang trailing koma / key tanpa value.
+        $json = preg_replace('/,\s*$/', '', $json) ?? $json;
+        $json = preg_replace('/,\s*"[^"]*"\s*:\s*$/', '', $json) ?? $json;
+        $json = preg_replace('/,\s*\{[^}]*$/', '', $json) ?? $json;
+
+        // Tutup string terbuka (jumlah " ganjil di luar escape kasar).
+        $quoteCount = preg_match_all('/(?<!\\\\)"/', $json) ?: 0;
+        if ($quoteCount % 2 === 1) {
+            $json .= '"';
+        }
+
+        $json = preg_replace('/,\s*$/', '', $json) ?? $json;
+
+        // Tutup array/object yang masih terbuka.
+        $stack = [];
+        $len = strlen($json);
+        $inString = false;
+        for ($i = 0; $i < $len; $i++) {
+            $ch = $json[$i];
+            $prev = $i > 0 ? $json[$i - 1] : '';
+            if ($ch === '"' && $prev !== '\\') {
+                $inString = ! $inString;
+                continue;
+            }
+            if ($inString) {
+                continue;
+            }
+            if ($ch === '{') {
+                $stack[] = '}';
+            } elseif ($ch === '[') {
+                $stack[] = ']';
+            } elseif ($ch === '}' || $ch === ']') {
+                array_pop($stack);
+            }
+        }
+        while ($stack !== []) {
+            $json .= array_pop($stack);
+        }
+
+        // Jika scenes terpotong di tengah objek, pastikan key scenes ada sebagai array.
+        if (! str_contains($json, '"scenes"')) {
+            return $json;
+        }
+
+        return $json;
     }
 
     protected function bannedHookPhrasesForPrompt(): string
