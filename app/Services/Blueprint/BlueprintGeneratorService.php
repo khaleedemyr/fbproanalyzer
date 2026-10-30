@@ -2163,12 +2163,15 @@ TXT;
             $kind = (string) ($seg['kind'] ?? 'content');
             $section = (string) ($seg['section'] ?? 'BAB');
             $beatsHere = $kind === 'bumper' ? 1 : max(1, (int) ($alloc[$si] ?? 1));
-            $voLines = $seg['vo_lines'] ?? [];
-            if ($voLines === [] && $kind !== 'bumper') {
-                $voLines = ["Bagian {$section} tentang {$topic}."];
+            $seedVo = $seg['vo_lines'] ?? [];
+            $onSeed = trim((string) ($seg['on_screen'] ?? ''));
+
+            // Expand dulu ke jumlah beat — JANGAN cycle kalimat yang sama + suffix.
+            if ($kind !== 'bumper') {
+                $voLines = $this->expandSectionVoLines($seedVo, $beatsHere, $section, $topic, $coverTheme);
+            } else {
+                $voLines = [];
             }
-            $voCount = max(1, count($voLines));
-            $onBase = trim((string) ($seg['on_screen'] ?? ''));
 
             // Plate index restart per section supaya gambar tidak nyampur antar bab.
             $sectionPlateBase = $globalBeat > 0 ? (int) (($out[count($out) - 1]['visual_plate'] ?? 0) + 1) : 0;
@@ -2197,17 +2200,9 @@ TXT;
                 }
 
                 $end = min($total, $start + $voBeat);
-
-                $vo = (string) $voLines[$b % $voCount];
-                $cycle = intdiv($b, $voCount);
-                if ($cycle > 0) {
-                    $vo = $this->varyLongFormVoLine($vo, $topic, $globalBeat, $cycle);
-                }
-
-                $on = $onBase;
-                if ($on === '' || $cycle > 0) {
-                    $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $coverTheme, 34, ''));
-                }
+                $vo = (string) ($voLines[$b] ?? "Lanjut {$section}: {$topic}.");
+                // On-screen ikut VO beat ini (bukan label sama sepanjang bab).
+                $on = $this->onScreenFromVo($vo, $onSeed, $coverTheme, $b === 0);
 
                 $localPlate = intdiv($b * $voBeat, $visualBeat);
 
@@ -2573,17 +2568,236 @@ TXT;
         return array_values($lines);
     }
 
-    protected function varyLongFormVoLine(string $vo, string $topic, int $index, int $cycle): string
+    /**
+     * Expand seed VO pendek jadi N baris unik yang maju (bukan kalimat sama + suffix).
+     *
+     * @param  list<string>  $seed
+     * @return list<string>
+     */
+    protected function expandSectionVoLines(
+        array $seed,
+        int $need,
+        string $section,
+        string $topic,
+        string $coverTheme,
+    ): array {
+        $need = max(1, $need);
+        $seed = array_values(array_unique(array_filter(array_map(
+            fn ($x) => trim((string) $x),
+            $seed
+        ))));
+        if ($seed === []) {
+            $seed = [$this->sectionSeedLine($section, $topic, $coverTheme)];
+        }
+
+        $out = [];
+        $seen = [];
+        foreach ($seed as $line) {
+            if (count($out) >= $need) {
+                break;
+            }
+            $key = Str::lower(preg_replace('/\s+/', ' ', $line) ?? $line);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = $line;
+        }
+
+        $bank = $this->sectionProgressionBank($section, $topic, $coverTheme, $seed);
+        $i = 0;
+        while (count($out) < $need && $bank !== []) {
+            $line = $bank[$i % count($bank)];
+            $i++;
+            $key = Str::lower(preg_replace('/\s+/', ' ', $line) ?? $line);
+            // Tolak kalau hampir sama dengan seed (beda cuma suffix lemah).
+            if (isset($seen[$key]) || $this->voTooSimilarToAny($line, $out)) {
+                // Mutasi unik pakai indeks.
+                $line = $this->uniqueProgressLine($section, $topic, count($out) + 1, $need, $coverTheme);
+                $key = Str::lower(preg_replace('/\s+/', ' ', $line) ?? $line);
+                if (isset($seen[$key])) {
+                    $line .= ' ('.$this->voicePerspective.' catat poin '.count($out).'.)';
+                    $key = Str::lower($line);
+                }
+            }
+            $seen[$key] = true;
+            $out[] = $line;
+        }
+
+        while (count($out) < $need) {
+            $out[] = $this->uniqueProgressLine($section, $topic, count($out) + 1, $need, $coverTheme);
+        }
+
+        return array_slice($out, 0, $need);
+    }
+
+    /**
+     * @param  list<string>  $seed
+     * @return list<string>
+     */
+    protected function sectionProgressionBank(
+        string $section,
+        string $topic,
+        string $coverTheme,
+        array $seed,
+    ): array {
+        $sec = Str::upper($section);
+        $vp = $this->voicePerspective;
+        $short = Str::limit($topic, 60, '');
+        $theme = Str::limit($coverTheme, 50, '');
+        $hookFact = $seed[0] ?? null;
+
+        if (str_contains($sec, 'HOOK')) {
+            $bank = array_values(array_filter([
+                $hookFact,
+                "Korban merasa menolong — padahal justru masuk perangkap empati soal {$short}.",
+                "Itu bukan kebaikan netral. Itu pintu masuk manipulasi yang terlihat hangat.",
+                "{$vp} sering mengira rasa iba = sinyal aman. Di sini justru alarm merah.",
+                "Pola klasik: buat dirimu terlihat lemah, supaya orang menurunkan penjaga.",
+                "Setelah pintu terbuka, kontrol bergeser pelan — tanpa teriakan.",
+                "Ini bukan cerita kriminal semata. Ini template yang masih dipakai di hubungan toxic.",
+                "Kalau {$vp} pernah 'kasihan dulu, rugi kemudian' — bingkainya sama.",
+                "Hook ini penting: {$vp} harus kenali jebakan empati sebelum bab taktiknya.",
+                "Simpan satu pertanyaan: siapa yang paling diuntungkan dari rasa iba {$vp}?",
+            ]));
+        } elseif (str_contains($sec, 'PENUTUP')) {
+            $bank = [
+                "Kesimpulan: {$short} bukan soal menang argumen — soal merebut bingkai.",
+                "Mulai hari ini: {$vp} tahan 2 detik sebelum menjelaskan diri.",
+                "Catat 1 pola yang paling sering menjebak {$vp}, lalu uji balasan pendek.",
+                "Bagikan ke orang yang sering 'salah sendiri' setelah bilang tidak.",
+                "Episode ini bagian dari {$theme}. Simpan, ulangi, praktikkan.",
+                "CTA: like kalau kena, share ke yang sedang dilucuti empatinya.",
+                "{$vp} tidak harus kasar untuk kuat — cukup berhenti memberi akses gratis.",
+                "Tutup dengan aturan baru: iba boleh, tapi penjaga tetap nyala.",
+            ];
+        } else {
+            // BAB 1/2/3 — pecah jadi langkah, contoh, kesalahan, perbaikan.
+            $babNum = 1;
+            if (preg_match('/BAB\s*(\d+)/', $sec, $m)) {
+                $babNum = (int) $m[1];
+            }
+            $bank = [
+                "Bab {$babNum}: inti soal {$short} yang paling sering terlewat.",
+                "Pertama, kenali sinyal awal sebelum {$vp} kehilangan bingkai.",
+                "Kedua, jangan buru-buru membela — itu menyerahkan mahkota percakapan.",
+                "Contoh sehari-hari: tuduhan halus yang memaksa {$vp} menjelaskan berlebih.",
+                "Kesalahan umum: membalas dengan paragraf panjang. Semakin panjang, semakin lemah.",
+                "Perbaikan: satu kalimat reframing, lalu diam. Biarkan lawan mengisi kekosongan.",
+                "{$vp} boleh empati, tapi jangan bayar empati dengan akses tanpa batas.",
+                "Uji cepat: kalau setelah 'menolong' {$vp} merasa bersalah — cek ulang motifya.",
+                "Pindahkan fokus dari 'membuktikan baik' ke 'menjaga batas'.",
+                "Simpan frasa siap pakai: '{$vp} dengar. Yang {$vp} putuskan beda.'",
+                "Lapisan berikutnya: orang toxic memutar fakta sampai {$vp} meragukan ingatan sendiri.",
+                "Kalau pola itu muncul, catat kronologi singkat — jangan debat emosional.",
+                "Taktik lawan: buat {$vp} terlihat kejam jika bilang tidak. Itu frame control.",
+                "Balasan dingin lebih aman daripada penjelasan panas.",
+                "Bab {$babNum} ditutup: {$vp} latihan 1 situasi nyata malam ini.",
+            ];
+        }
+
+        return array_values(array_unique(array_filter($bank)));
+    }
+
+    protected function sectionSeedLine(string $section, string $topic, string $coverTheme): string
     {
-        $suffixes = [
-            " Itu lapisan ke-{$cycle} dari pola yang sama.",
-            ' Perhatikan lagi dari sudut berbeda.',
-            " Kaitkan dengan {$topic} di hidupmu.",
-            ' Jangan lewati detail ini.',
-            ' Simpan poin ini sebelum lanjut.',
+        $sec = Str::upper($section);
+        if (str_contains($sec, 'HOOK')) {
+            return "Ada pola gelap di balik {$topic} yang jarang dibuka terang-terangan.";
+        }
+        if (str_contains($sec, 'PENUTUP')) {
+            return "Ringkas: {$this->voicePerspective} jaga bingkai, bukan membuktikan diri soal {$topic}.";
+        }
+
+        return "Mari bedah bagian ini: {$topic} — {$coverTheme}.";
+    }
+
+    protected function uniqueProgressLine(
+        string $section,
+        string $topic,
+        int $step,
+        int $total,
+        string $coverTheme,
+    ): string {
+        $vp = $this->voicePerspective;
+        $short = Str::limit($topic, 55, '');
+        $templates = [
+            "Poin {$step}/{$total}: {$vp} cek ulang siapa yang menguasai bingkai soal {$short}.",
+            "Langkah {$step}: tahan reaksi, amati motif, baru jawab singkat tentang {$short}.",
+            "Detail {$step}: kalau {$vp} merasa wajib menjelaskan, itu sinyal bingkai sudah digeser.",
+            "Latihan {$step}: tulis 1 batas yang {$vp} langgar demi tampak baik di {$short}.",
+            "Peringatan {$step}: empati tanpa penjaga = pintu masuk pola {$coverTheme}.",
+            "Catatan {$step}: diam taktis 2–3 detik sering mematahkan tekanan soal {$short}.",
         ];
 
-        return rtrim($vo, " \t.").$suffixes[$index % count($suffixes)];
+        return $templates[($step - 1) % count($templates)];
+    }
+
+    /**
+     * @param  list<string>  $existing
+     */
+    protected function voTooSimilarToAny(string $line, array $existing): bool
+    {
+        $a = $this->voFingerprint($line);
+        if ($a === '') {
+            return false;
+        }
+        foreach ($existing as $other) {
+            $b = $this->voFingerprint((string) $other);
+            if ($b === '') {
+                continue;
+            }
+            similar_text($a, $b, $pct);
+            if ($pct >= 72) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function voFingerprint(string $line): string
+    {
+        $line = Str::lower(preg_replace('/[^\pL\pN\s]+/u', ' ', $line) ?? $line);
+        $line = preg_replace('/\s+/', ' ', trim($line)) ?? '';
+        // Buang suffix lemah lama kalau masih nempel.
+        $line = preg_replace('/\b(perhatikan lagi|sudut berbeda|lapisan ke|kaitkan dengan|jangan lewati|simpan poin).*$/u', '', $line) ?? $line;
+
+        return trim($line);
+    }
+
+    protected function onScreenFromVo(string $vo, string $sectionSeed, string $coverTheme, bool $preferSeed): string
+    {
+        if ($preferSeed && $sectionSeed !== '' && ! str_contains(Str::lower($sectionSeed), 'tahun 1974')) {
+            return Str::upper(Str::limit($sectionSeed, 34, ''));
+        }
+
+        // Ambil 3–6 kata bermakna dari VO (bukan menempel seluruh kalimat).
+        $words = preg_split('/\s+/u', trim(preg_replace('/[^\pL\pN\s]+/u', ' ', $vo) ?? $vo)) ?: [];
+        $stop = ['yang', 'dan', 'atau', 'dengan', 'untuk', 'dari', 'ini', 'itu', 'ada', 'di', 'ke', 'pada', 'oleh', 'karena', 'kalau', 'tapi', 'sudah', 'akan', 'dalam', 'adalah', 'the', 'a', 'an'];
+        $picked = [];
+        foreach ($words as $w) {
+            $lw = Str::lower($w);
+            if (mb_strlen($lw) < 4 || in_array($lw, $stop, true)) {
+                continue;
+            }
+            $picked[] = $w;
+            if (count($picked) >= 5) {
+                break;
+            }
+        }
+        $label = implode(' ', $picked);
+        if ($label === '') {
+            $label = $sectionSeed !== '' ? $sectionSeed : $coverTheme;
+        }
+
+        return Str::upper(Str::limit($label, 34, ''));
+    }
+
+    protected function varyLongFormVoLine(string $vo, string $topic, int $index, int $cycle): string
+    {
+        // Dipakai path lama — arahkan ke baris progres unik, jangan tempel suffix.
+        return $this->uniqueProgressLine('BAB', $topic, max(1, $index), max(1, $index + $cycle), $topic);
     }
 
     /**
