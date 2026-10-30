@@ -13,6 +13,9 @@ const sources = ref(null);
 const history = ref([]);
 const brief = ref(null);
 const topic = ref('');
+const editTitle = ref('');
+const editHook = ref('');
+const editAngle = ref('');
 const format = ref('reels_vo');
 const voicePerspective = ref('Aku');
 const durationSeconds = ref(15);
@@ -50,6 +53,19 @@ const resume = computed(() => brief.value?.resume || {});
 const warnings = computed(() => sources.value?.warnings || brief.value?.inputs_snapshot?.warnings || []);
 const available = computed(() => sources.value?.available || {});
 
+function syncEditFromBrief(row) {
+    const r = row?.resume || {};
+    editTitle.value = String(r.working_title || row?.title || '');
+    editHook.value = String(r.hook || '');
+    editAngle.value = String(r.angle || '');
+    if (r.suggested_format) format.value = r.suggested_format;
+    if (row?.source_topic) topic.value = String(row.source_topic);
+}
+
+function applyTitleOption(opt) {
+    if (opt) editTitle.value = String(opt);
+}
+
 async function loadSources() {
     loading.value = true;
     error.value = '';
@@ -74,9 +90,7 @@ async function loadHistory() {
         history.value = data.data || [];
         if (!brief.value && history.value.length) {
             brief.value = history.value[0];
-            if (brief.value?.resume?.suggested_format) {
-                format.value = brief.value.resume.suggested_format;
-            }
+            syncEditFromBrief(brief.value);
         }
     } catch {
         /* ignore */
@@ -104,10 +118,8 @@ async function compose() {
         }
         const { data } = await http.post('/brief-studio/compose', payload, { timeout: 120000 });
         brief.value = data.data;
-        if (brief.value?.resume?.suggested_format) {
-            format.value = brief.value.resume.suggested_format;
-        }
-        message.value = data.message;
+        syncEditFromBrief(brief.value);
+        message.value = data.message || 'Resume baru disusun. Edit judul/hook di bawah kalau mau, lalu Generate Blueprint.';
         await loadHistory();
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal compose resume.';
@@ -126,6 +138,10 @@ async function makeBlueprint() {
             format: format.value,
             force: true,
         };
+        if (editTitle.value.trim()) payload.working_title = editTitle.value.trim();
+        if (editHook.value.trim()) payload.hook = editHook.value.trim();
+        if (editAngle.value.trim()) payload.angle = editAngle.value.trim();
+        if (topic.value.trim()) payload.topic = topic.value.trim();
         if (needsVoice.value) {
             payload.voice_perspective = voicePerspective.value || 'Aku';
         }
@@ -168,7 +184,7 @@ async function removeBrief(id) {
 
 function openBrief(row) {
     brief.value = row;
-    if (row?.resume?.suggested_format) format.value = row.resume.suggested_format;
+    syncEditFromBrief(row);
 }
 
 onMounted(async () => {
@@ -183,7 +199,7 @@ onMounted(async () => {
             <div>
                 <h2 class="text-2xl font-semibold text-slate-900">Brief Studio</h2>
                 <p class="mt-1 text-sm text-slate-500">
-                    Gabungkan Auto Radar + Angle Finder + Analisa AI jadi 1 resume tajam, lalu generate Blueprint yang powerful.
+                    1) Isi seed topik → Compose Resume (judul baru). 2) Edit judul/hook di resume. 3) Generate Blueprint.
                 </p>
             </div>
             <div class="flex flex-wrap gap-2">
@@ -212,15 +228,16 @@ onMounted(async () => {
 
         <section class="rounded-xl border border-slate-200 bg-white p-5">
             <label class="block text-sm">
-                <span class="mb-1 block text-xs font-semibold text-slate-500">Seed topik (opsional)</span>
+                <span class="mb-1 block text-xs font-semibold text-slate-500">Topik pembahasan (seed untuk Compose Resume)</span>
                 <input
                     v-model="topic"
-                    placeholder="Contoh: toxic parents / overthinking / gaslighting"
+                    placeholder="Contoh: toxic parents / overthinking / gaslighting / frame control"
                     class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
             </label>
             <p class="mt-2 text-xs text-slate-500">
-                Sumber tersedia: Radar {{ available.radar_count || 0 }} · Angle {{ available.angle_count || 0 }} · Analisa AI {{ available.analytics_count || 0 }}
+                Ini yang menentukan judul resume. Kalau dikosongkan, sistem ambil dari Angle/Analisa terakhir (makanya sering “Mitos Karma…” terus).
+                Sumber: Radar {{ available.radar_count || 0 }} · Angle {{ available.angle_count || 0 }} · Analisa AI {{ available.analytics_count || 0 }}
             </p>
         </section>
 
@@ -340,21 +357,39 @@ onMounted(async () => {
             </div>
 
             <p class="text-sm font-medium text-slate-900">{{ resume.headline }}</p>
+            <p class="text-xs text-amber-900 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                Tombol <strong>Generate Blueprint</strong> hanya mengubah durasi/beat — judul tetap dari field di bawah.
+                Mau topik beda? Isi seed di atas → <strong>Compose Resume</strong>, atau edit judul/hook di sini.
+            </p>
             <div class="grid gap-3 md:grid-cols-2">
-                <div class="rounded-lg border border-slate-200 bg-white p-3">
-                    <p class="text-[11px] font-semibold uppercase text-slate-500">Judul kerja</p>
-                    <p class="mt-1 text-sm text-slate-900">{{ resume.working_title }}</p>
-                </div>
-                <div class="rounded-lg border border-slate-200 bg-white p-3">
-                    <p class="text-[11px] font-semibold uppercase text-slate-500">Hook</p>
-                    <p class="mt-1 text-sm text-slate-900">{{ resume.hook }}</p>
-                </div>
+                <label class="rounded-lg border border-slate-200 bg-white p-3 block">
+                    <span class="text-[11px] font-semibold uppercase text-slate-500">Judul kerja (bisa diedit)</span>
+                    <input
+                        v-model="editTitle"
+                        class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900"
+                        placeholder="Judul cover / tema episode"
+                    />
+                </label>
+                <label class="rounded-lg border border-slate-200 bg-white p-3 block">
+                    <span class="text-[11px] font-semibold uppercase text-slate-500">Hook (bisa diedit)</span>
+                    <textarea
+                        v-model="editHook"
+                        rows="3"
+                        class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+                        placeholder="Kalimat pembuka"
+                    />
+                </label>
             </div>
-            <div class="rounded-lg border border-slate-200 bg-white p-3">
-                <p class="text-[11px] font-semibold uppercase text-slate-500">Angle</p>
-                <p class="mt-1 text-sm text-slate-800">{{ resume.angle }}</p>
-                <p class="mt-2 text-xs text-slate-500">{{ resume.why_now }}</p>
-            </div>
+            <label class="rounded-lg border border-slate-200 bg-white p-3 block">
+                <span class="text-[11px] font-semibold uppercase text-slate-500">Angle / arah pembahasan (bisa diedit)</span>
+                <textarea
+                    v-model="editAngle"
+                    rows="3"
+                    class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800"
+                    placeholder="Sudut pembongkaran / thesis video"
+                />
+                <p v-if="resume.why_now" class="mt-2 text-xs text-slate-500">{{ resume.why_now }}</p>
+            </label>
 
             <div class="grid gap-4 md:grid-cols-3">
                 <div>
@@ -378,10 +413,16 @@ onMounted(async () => {
             </div>
 
             <div>
-                <p class="text-xs font-semibold uppercase text-slate-500">Title options</p>
+                <p class="text-xs font-semibold uppercase text-slate-500">Title options — klik untuk pakai sebagai judul kerja</p>
                 <ul class="mt-2 space-y-1">
-                    <li v-for="(t, i) in resume.title_options || []" :key="'t'+i" class="rounded bg-white px-3 py-2 text-sm text-slate-800 border border-slate-100">
-                        {{ t }}
+                    <li v-for="(t, i) in resume.title_options || []" :key="'t'+i">
+                        <button
+                            type="button"
+                            class="w-full rounded border border-slate-100 bg-white px-3 py-2 text-left text-sm text-slate-800 hover:border-teal-300 hover:bg-teal-50"
+                            @click="applyTitleOption(t)"
+                        >
+                            {{ t }}
+                        </button>
                     </li>
                 </ul>
             </div>

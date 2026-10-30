@@ -132,17 +132,39 @@ class BriefStudioService
     }
 
     /**
-     * @param  array{format?:string|null,planned_date?:string|null,planned_time?:string|null,duration_seconds?:int|null,duration_minutes?:int|null,visual_beat_seconds?:int|null,vo_beat_seconds?:int|null,beat_seconds?:int|null,prefer_stock?:bool|null,voice_perspective?:string|null,force?:bool}  $options
+     * @param  array{format?:string|null,planned_date?:string|null,planned_time?:string|null,duration_seconds?:int|null,duration_minutes?:int|null,visual_beat_seconds?:int|null,vo_beat_seconds?:int|null,beat_seconds?:int|null,prefer_stock?:bool|null,voice_perspective?:string|null,force?:bool,topic?:string|null,working_title?:string|null,hook?:string|null,angle?:string|null}  $options
      */
     public function generateBlueprint(User $user, ContentBrief $brief, array $options = []): ContentBlueprint
     {
         abort_unless($brief->user_id === $user->id, 403);
 
         $resume = $brief->resume ?? [];
-        $workingTitle = trim((string) ($resume['working_title'] ?? $brief->title ?? $brief->source_topic ?? 'Konten viral'));
-        $hook = trim((string) ($resume['hook'] ?? ''));
-        $angle = trim((string) ($resume['angle'] ?? ''));
-        $topic = $workingTitle;
+        $workingTitle = trim((string) ($options['working_title'] ?? $resume['working_title'] ?? $brief->title ?? $brief->source_topic ?? 'Konten viral'));
+        $hook = trim((string) ($options['hook'] ?? $resume['hook'] ?? ''));
+        $angle = trim((string) ($options['angle'] ?? $resume['angle'] ?? ''));
+        $seedTopic = trim((string) ($options['topic'] ?? $brief->source_topic ?? ''));
+
+        // Persist edit ringan ke resume supaya generate berikutnya tidak “balik” ke judul lama.
+        $resume['working_title'] = $workingTitle !== '' ? $workingTitle : ($resume['working_title'] ?? '');
+        if ($hook !== '') {
+            $resume['hook'] = $hook;
+        }
+        if ($angle !== '') {
+            $resume['angle'] = $angle;
+        }
+        $brief->resume = $resume;
+        if ($workingTitle !== '') {
+            $brief->title = Str::limit($workingTitle, 160, '');
+        }
+        if ($seedTopic !== '') {
+            $brief->source_topic = Str::limit($seedTopic, 255, '');
+        }
+        $brief->save();
+
+        $topic = $workingTitle !== '' ? $workingTitle : ($seedTopic !== '' ? $seedTopic : 'Konten viral');
+        if ($seedTopic !== '' && ! str_contains(Str::lower($topic), Str::lower($seedTopic))) {
+            $topic = $seedTopic.' — '.$topic;
+        }
         if ($hook !== '') {
             $topic .= ' — '.$hook;
         } elseif ($angle !== '') {

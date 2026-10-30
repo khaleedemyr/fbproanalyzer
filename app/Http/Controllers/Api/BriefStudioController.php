@@ -104,6 +104,10 @@ class BriefStudioController extends Controller
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
             'force' => ['sometimes', 'boolean'],
+            'topic' => ['nullable', 'string', 'max:500'],
+            'working_title' => ['nullable', 'string', 'max:200'],
+            'hook' => ['nullable', 'string', 'max:1000'],
+            'angle' => ['nullable', 'string', 'max:2000'],
         ]);
 
         try {
