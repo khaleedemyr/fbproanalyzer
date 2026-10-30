@@ -138,8 +138,20 @@ class BlueprintGeneratorService
             }
         }
 
-        // Video panjang: Gemini tulis kerangka (~48–72 scene), lalu normalizeLongFormTimeline expand ke beat penuh.
-        $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
+        // Video panjang di shared hosting: Gemini sering >60–120s → proxy putus (log kosong di Laravel).
+        // Default template cepat; AI hanya jika use_ai=true.
+        $useAi = array_key_exists('use_ai', $options)
+            ? (bool) $options['use_ai']
+            : $format !== self::FORMAT_REELS_PANJANG;
+        $skipAi = (bool) ($options['skip_ai'] ?? false) || ! $useAi;
+
+        $gemini = null;
+        if (! $skipAi) {
+            $gemini = $this->tryGemini($kit, $cleanTitle, $cleanTopic, $idea, $format, $extraContext);
+        } elseif ($format === self::FORMAT_REELS_PANJANG) {
+            $this->lastWarning = 'Mode cepat (template) — centang “Pakai AI Gemini” jika mau kerangka AI (lebih lambat, rawan timeout hosting).';
+        }
+
         if ($gemini !== null) {
             $this->lastEngine = 'gemini';
             $payload = $gemini;
@@ -515,7 +527,8 @@ class BlueprintGeneratorService
 
         foreach ($models as $model) {
             try {
-                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 180 : 60)
+                // Hostinger/proxy biasanya potong request ~60–120s — jangan tunggu Gemini terlalu lama.
+                $response = Http::timeout($format === self::FORMAT_REELS_PANJANG ? 45 : 55)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}",

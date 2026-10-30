@@ -231,6 +231,12 @@ class BriefStudioService
             : null;
 
         $visualBeat = $options['visual_beat_seconds'] ?? $options['beat_seconds'] ?? null;
+        $isLong = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG;
+        // Default: video panjang pakai template cepat (hindari timeout hosting tanpa log).
+        $useAi = array_key_exists('use_ai', $options)
+            ? (bool) $options['use_ai']
+            : ! $isLong;
+
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,
             'duration_minutes' => $options['duration_minutes'] ?? null,
@@ -241,6 +247,8 @@ class BriefStudioService
             'voice_perspective' => $options['voice_perspective'] ?? null,
             'planned_time' => $options['planned_time'] ?? null,
             'force' => (bool) ($options['force'] ?? false),
+            'use_ai' => $useAi,
+            'skip_ai' => ! $useAi,
             'analytics_ai_analysis_id' => $brief->analytics_ai_analysis_id,
             'content_brief' => $brief,
             'angle_finding_id' => $brief->angle_finding_id,

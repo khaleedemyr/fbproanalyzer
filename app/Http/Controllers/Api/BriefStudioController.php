@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\BrandKit;
 use App\Models\ContentBrief;
 use App\Services\Blueprint\BlueprintGeneratorService;
 use App\Services\Brief\BriefStudioService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class BriefStudioController extends Controller
 {
@@ -89,8 +89,16 @@ class BriefStudioController extends Controller
     public function blueprint(Request $request, ContentBrief $contentBrief, BriefStudioService $studio): JsonResponse
     {
         abort_unless($contentBrief->user_id === $request->user()->id, 403);
-        @set_time_limit(600);
+        @set_time_limit(120);
         @ini_set('memory_limit', '512M');
+
+        Log::info('brief_studio.blueprint.start', [
+            'brief_id' => $contentBrief->id,
+            'user_id' => $request->user()->id,
+            'format' => $request->input('format'),
+            'duration_minutes' => $request->input('duration_minutes'),
+            'use_ai' => $request->input('use_ai'),
+        ]);
 
         $formatList = implode(',', BlueprintGeneratorService::FORMATS);
         try {
@@ -104,6 +112,7 @@ class BriefStudioController extends Controller
                 'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
                 'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
                 'prefer_stock' => ['sometimes', 'boolean'],
+                'use_ai' => ['sometimes', 'boolean'],
                 'voice_perspective' => ['nullable', 'string', 'max:40'],
                 'force' => ['sometimes', 'boolean'],
                 'topic' => ['nullable', 'string', 'max:500'],
@@ -122,28 +131,42 @@ class BriefStudioController extends Controller
             $bp = $studio->generateBlueprint($request->user(), $contentBrief, $data);
         } catch (\Throwable $e) {
             report($e);
-            $hint = $e->getMessage();
-            if (str_contains($hint, 'vo_beat_seconds')) {
-                $hint .= ' — jalankan di Hostinger: php artisan migrate --force';
-            }
+            Log::error('brief_studio.blueprint.fail', [
+                'brief_id' => $contentBrief->id,
+                'error' => $e->getMessage(),
+            ]);
 
-            return response()->json(['message' => 'Gagal generate blueprint dari resume: '.$hint], 500);
+            return response()->json([
+                'message' => 'Gagal generate blueprint dari resume: '.$e->getMessage(),
+            ], 500);
         }
 
-        $bp->load(['brandKit', 'analyticsAiAnalysis', 'contentBrief']);
         $generator = app(BlueprintGeneratorService::class);
-        $sceneCount = count($bp->scenes ?? []);
-        // Markdown penuh untuk 100+ scene bikin response timeout di shared hosting.
-        $markdown = $sceneCount > 120
-            ? ''
-            : $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($request->user()));
 
+        Log::info('brief_studio.blueprint.ok', [
+            'brief_id' => $contentBrief->id,
+            'blueprint_id' => $bp->id,
+            'engine' => $bp->engine,
+            'scenes' => count($bp->scenes ?? []),
+        ]);
+
+        // Response ringan: scene besar sering bikin proxy putus setelah generate sukses.
         return response()->json([
             'message' => 'Blueprint dari Brief Studio siap'
-                .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template).'),
-            'data' => $bp,
+                .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template cepat).'),
+            'data' => [
+                'id' => $bp->id,
+                'title' => $bp->title,
+                'cover_theme' => $bp->cover_theme,
+                'format' => $bp->format,
+                'engine' => $bp->engine,
+                'duration_seconds' => $bp->duration_seconds,
+                'beat_seconds' => $bp->beat_seconds,
+                'vo_beat_seconds' => $bp->vo_beat_seconds,
+                'status' => $bp->status,
+            ],
             'brief' => $contentBrief->fresh()->toBriefArray(),
-            'markdown' => $markdown,
+            'markdown' => '',
             'engine' => $bp->engine,
             'warning' => $generator->lastWarning(),
         ], 201);
@@ -154,6 +177,6 @@ class BriefStudioController extends Controller
         abort_unless($contentBrief->user_id === $request->user()->id, 403);
         $contentBrief->delete();
 
-        return response()->json(['ok' => true]);
+        return response()->json(['message' => 'Resume dihapus.']);
     }
 }

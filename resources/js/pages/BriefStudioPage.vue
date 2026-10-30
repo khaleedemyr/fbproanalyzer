@@ -24,6 +24,7 @@ const textDurationSeconds = ref(8);
 const visualBeatSeconds = ref(10);
 const voBeatSeconds = ref(5);
 const preferStock = ref(false);
+const useAi = ref(false);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -74,13 +75,26 @@ const themeSuggestions = computed(() => {
 
 function apiError(e, fallback) {
     if (e?.code === 'ECONNABORTED' || String(e?.message || '').toLowerCase().includes('timeout')) {
-        return 'Timeout generate — coba 10–15 menit dulu, atau jalankan migrate di Hostinger (kolom vo_beat_seconds).';
+        return 'Timeout di browser/hosting — generate video panjang pakai mode cepat (jangan centang AI), durasi 10–15 mnt dulu.';
     }
-    const data = e?.response?.data;
+    const status = e?.response?.status;
+    if (status === 502 || status === 504 || status === 524) {
+        return `Server/proxy putus (HTTP ${status}) sebelum selesai. Biasanya Gemini terlalu lama — uncheck “Pakai AI Gemini”, generate ulang.`;
+    }
+    if (!e?.response) {
+        return 'Koneksi putus tanpa respons server (sering timeout Hostinger). Coba mode cepat tanpa AI, durasi lebih pendek.';
+    }
+    const data = e.response.data;
     if (data?.errors) {
         return Object.values(data.errors).flat().join(' ');
     }
-    return data?.message || fallback;
+    if (typeof data?.message === 'string' && data.message.trim()) {
+        return data.message;
+    }
+    if (typeof data === 'string' && data.trim()) {
+        return `HTTP ${status}: ${data.slice(0, 180)}`;
+    }
+    return `${fallback}${status ? ` (HTTP ${status})` : ''}`;
 }
 
 function syncEditFromBrief(row) {
@@ -193,20 +207,27 @@ async function makeBlueprint() {
             payload.visual_beat_seconds = Number(visualBeatSeconds.value);
             payload.vo_beat_seconds = Number(voBeatSeconds.value);
             payload.prefer_stock = !!preferStock.value;
+            payload.use_ai = !!useAi.value;
         } else if (isText.value) {
             payload.duration_seconds = Number(textDurationSeconds.value);
+            payload.use_ai = true;
         } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
+            payload.use_ai = true;
+        } else {
+            payload.use_ai = true;
         }
 
         const { data } = await http.post(
             `/brief-studio/${brief.value.id}/blueprint`,
             payload,
-            { timeout: 300000 }
+            { timeout: useAi.value && isLong.value ? 120000 : 90000 }
         );
         message.value = data.message;
         brief.value = data.brief || brief.value;
-        if (data.warning) error.value = data.warning;
+        if (data.warning) {
+            message.value = `${data.message || ''} ${data.warning}`.trim();
+        }
         await loadHistory();
         if (data.data?.id) {
             router.push({ name: 'blueprint-detail', params: { id: data.data.id } });
@@ -407,7 +428,11 @@ onMounted(async () => {
                     </label>
                     <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700">
                         <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
-                        Campur stock (default: ilustrasi buku)
+                        Campur stock
+                    </label>
+                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="AI lambat di Hostinger sering putus tanpa log">
+                        <input v-model="useAi" type="checkbox" class="rounded border-slate-300" />
+                        Pakai AI Gemini (lambat)
                     </label>
                     <button
                         type="button"
@@ -415,7 +440,7 @@ onMounted(async () => {
                         :disabled="generating"
                         @click="makeBlueprint"
                     >
-                        {{ generating ? 'Generate Blueprint...' : 'Generate Blueprint dari Resume' }}
+                        {{ generating ? 'Generate Blueprint...' : (isLong && !useAi ? 'Generate cepat (template)' : 'Generate Blueprint dari Resume') }}
                     </button>
                 </div>
             </div>
