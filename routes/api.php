@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\YouTubeAuthController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\BrandKitController;
+use App\Http\Controllers\Api\BriefStudioController;
 use App\Http\Controllers\Api\ContentIdeaController;
 use App\Http\Controllers\Api\ContentPostController;
 use App\Http\Controllers\Api\DashboardController;
@@ -73,6 +74,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);
     Route::post('brand-kit/test-gemini', [BrandKitController::class, 'testGemini']);
+
+    Route::get('brief-studio/sources', [BriefStudioController::class, 'sources']);
+    Route::get('brief-studio', [BriefStudioController::class, 'index']);
+    Route::post('brief-studio/compose', [BriefStudioController::class, 'compose']);
+    Route::get('brief-studio/{contentBrief}', [BriefStudioController::class, 'show']);
+    Route::post('brief-studio/{contentBrief}/blueprint', [BriefStudioController::class, 'blueprint']);
+    Route::delete('brief-studio/{contentBrief}', [BriefStudioController::class, 'destroy']);
 
     Route::get('blueprints', [BlueprintController::class, 'index']);
     Route::post('blueprints/generate', [BlueprintController::class, 'generate']);

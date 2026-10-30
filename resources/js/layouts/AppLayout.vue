@@ -10,6 +10,7 @@ const links = [
     { to: '/radar', label: 'Auto Radar', name: 'radar' },
     { to: '/angle-finder', label: 'Angle Finder', name: 'angle-finder' },
     { to: '/analytics', label: 'Analytics', name: 'analytics' },
+    { to: '/brief-studio', label: 'Brief Studio', name: 'brief-studio' },
     { to: '/ideas', label: 'Ide Konten', name: 'ideas' },
     { to: '/blueprints', label: 'Blueprint', name: 'blueprints' },
     { to: '/calendar', label: 'Kalender', name: 'calendar' },

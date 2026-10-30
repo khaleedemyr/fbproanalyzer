@@ -13,6 +13,8 @@ class ContentBlueprint extends Model
         'content_idea_id',
         'trend_signal_id',
         'analytics_ai_analysis_id',
+        'content_brief_id',
+        'angle_finding_id',
         'title',
         'cover_theme',
         'story_concept',
@@ -77,5 +79,15 @@ class ContentBlueprint extends Model
     public function analyticsAiAnalysis(): BelongsTo
     {
         return $this->belongsTo(AnalyticsAiAnalysis::class);
+    }
+
+    public function contentBrief(): BelongsTo
+    {
+        return $this->belongsTo(ContentBrief::class);
+    }
+
+    public function angleFinding(): BelongsTo
+    {
+        return $this->belongsTo(AngleFinding::class);
     }
 }

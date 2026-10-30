@@ -4,6 +4,7 @@ namespace App\Services\Blueprint;
 
 use App\Models\AnalyticsAiAnalysis;
 use App\Models\BrandKit;
+use App\Models\ContentBrief;
 use App\Models\ContentBlueprint;
 use App\Models\ContentIdea;
 use App\Models\TrendSignal;
@@ -59,7 +60,7 @@ class BlueprintGeneratorService
     }
 
     /**
-     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null,analytics_ai_analysis?:AnalyticsAiAnalysis|null,analytics_ai_analysis_id?:int|null}  $options
+     * @param  array{duration_seconds?:int,duration_minutes?:int,beat_seconds?:int,prefer_stock?:bool,force?:bool,voice_perspective?:string,planned_time?:string|null,analytics_ai_analysis?:AnalyticsAiAnalysis|null,analytics_ai_analysis_id?:int|null,content_brief?:ContentBrief|null,content_brief_id?:int|null,angle_finding_id?:int|null}  $options
      */
     public function generateFromTopic(
         User $user,
@@ -91,6 +92,21 @@ class BlueprintGeneratorService
             $analysis = null;
         }
 
+        $brief = $options['content_brief'] ?? null;
+        if (! $brief instanceof ContentBrief && ! empty($options['content_brief_id'])) {
+            $brief = ContentBrief::query()
+                ->where('user_id', $user->id)
+                ->find($options['content_brief_id']);
+        }
+        if ($brief instanceof ContentBrief && $brief->user_id !== $user->id) {
+            $brief = null;
+        }
+
+        $angleFindingId = isset($options['angle_finding_id']) ? (int) $options['angle_finding_id'] : null;
+        if (! $angleFindingId && $brief) {
+            $angleFindingId = $brief->angle_finding_id ? (int) $brief->angle_finding_id : null;
+        }
+
         $this->lastEngine = 'template';
         $this->lastWarning = null;
         $this->wasDuplicate = false;
@@ -98,6 +114,7 @@ class BlueprintGeneratorService
         $cleanTopic = $this->cleanTopic($topic, $idea, $signal);
         $cleanTitle = $this->coverTitle($cleanTopic, $idea);
         $extraContext = trim(implode("\n\n", array_filter([
+            $this->briefContext($brief),
             $this->radarContext($signal),
             $this->analyticsContext($analysis),
         ])));
@@ -172,7 +189,9 @@ class BlueprintGeneratorService
         }
 
         $storyConcept = (string) ($payload['story_concept'] ?? '');
-        if ($analysis && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'analisa ai')) {
+        if ($brief && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'brief studio')) {
+            $storyConcept .= "\n\n[Brief Studio #{$brief->id}] ".($brief->title ?: 'Resume gabungan Radar×Angle×Analytics');
+        } elseif ($analysis && $storyConcept !== '' && ! str_contains(Str::lower($storyConcept), 'analisa ai')) {
             $storyConcept .= "\n\n[Referensi Analisa AI #{$analysis->id}] ".$analysis->title;
         }
 
@@ -181,7 +200,9 @@ class BlueprintGeneratorService
             'brand_kit_id' => $kit->id,
             'content_idea_id' => $idea?->id,
             'trend_signal_id' => $signal?->id,
-            'analytics_ai_analysis_id' => $analysis?->id,
+            'analytics_ai_analysis_id' => $analysis?->id ?: $brief?->analytics_ai_analysis_id,
+            'content_brief_id' => $brief?->id,
+            'angle_finding_id' => $angleFindingId,
             'title' => $payload['title'],
             'cover_theme' => $payload['cover_theme'],
             'story_concept' => $storyConcept !== '' ? $storyConcept : ($payload['story_concept'] ?? null),
@@ -233,7 +254,10 @@ class BlueprintGeneratorService
         array $options = [],
     ): ContentBlueprint {
         // Jangan append snippet radar (metrik Google/YouTube) ke topik — itu bocor ke naskah VO.
-        $topic = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
+        $topic = trim((string) ($options['override_topic'] ?? ''));
+        if ($topic === '') {
+            $topic = (string) ($signal->keyword ?: $signal->title ?: 'psikologi');
+        }
 
         return $this->generateFromTopic($user, $topic, null, null, $signal, $plannedDate, $format, $force, $options);
     }
@@ -1278,6 +1302,45 @@ TXT;
         ]);
 
         return implode(' | ', $parts);
+    }
+
+    protected function briefContext(?ContentBrief $brief): string
+    {
+        if (! $brief) {
+            return '';
+        }
+
+        $resume = $brief->resume ?? [];
+        if ($resume === [] && filled($brief->resume_markdown)) {
+            return "RESUME BRIEF STUDIO (Radar × Angle × Analytics) — inspirasi sudut, JANGAN dibaca mentah di VO:\n"
+                .Str::limit((string) $brief->resume_markdown, 1800);
+        }
+
+        $lines = [
+            'RESUME BRIEF STUDIO (gabungan Auto Radar + Angle Finder + Analisa AI) — inspirasi WAJIB, jangan dibaca mentah di VO/caption:',
+            'Headline: '.($resume['headline'] ?? $brief->title),
+            'Judul kerja: '.($resume['working_title'] ?? '-'),
+            'Hook: '.($resume['hook'] ?? '-'),
+            'Angle: '.($resume['angle'] ?? '-'),
+            'Why now: '.Str::limit((string) ($resume['why_now'] ?? ''), 300),
+        ];
+
+        foreach (array_slice($resume['audience_pain'] ?? [], 0, 5) as $p) {
+            $lines[] = 'Pain: '.$p;
+        }
+        foreach (array_slice($resume['must_include'] ?? [], 0, 5) as $p) {
+            $lines[] = 'Must include: '.$p;
+        }
+        foreach (array_slice($resume['avoid'] ?? [], 0, 5) as $p) {
+            $lines[] = 'Avoid: '.$p;
+        }
+        foreach (array_slice($resume['title_options'] ?? [], 0, 5) as $p) {
+            $lines[] = 'Title option: '.$p;
+        }
+        $lines[] = 'CTA: '.($resume['cta'] ?? '-');
+        $lines[] = 'Blueprint HARUS selaras dengan resume gabungan ini (tren + komentar + data channel), bukan generic.';
+
+        return implode("\n", $lines);
     }
 
     protected function analyticsContext(?AnalyticsAiAnalysis $analysis): string

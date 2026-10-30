@@ -154,6 +154,12 @@ onMounted(load);
                         Utama stock
                     </span>
                     <span
+                        v-if="bp.content_brief_id"
+                        class="rounded bg-fuchsia-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-fuchsia-900"
+                    >
+                        Brief Studio #{{ bp.content_brief_id }}
+                    </span>
+                    <span
                         v-if="bp.analytics_ai_analysis_id"
                         class="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900"
                     >

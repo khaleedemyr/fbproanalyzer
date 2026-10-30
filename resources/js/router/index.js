@@ -40,6 +40,11 @@ const routes = [
                 component: () => import('../pages/AnalyticsTrackerPage.vue'),
             },
             {
+                path: 'brief-studio',
+                name: 'brief-studio',
+                component: () => import('../pages/BriefStudioPage.vue'),
+            },
+            {
                 path: 'posts',
                 name: 'posts',
                 component: () => import('../pages/PostsPage.vue'),
