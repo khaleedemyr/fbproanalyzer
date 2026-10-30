@@ -482,4 +482,80 @@ class BlueprintController extends Controller
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
     }
+
+    /**
+     * Prompt master dari blueprint tersimpan — siap tempel ke AI lain.
+     */
+    public function masterPrompt(Request $request, ContentBlueprint $blueprint, BlueprintGeneratorService $generator): JsonResponse
+    {
+        abort_unless($blueprint->user_id === $request->user()->id, 403);
+        $blueprint->load(['brandKit', 'contentIdea']);
+
+        $prompt = $generator->buildExportableMasterPromptForBlueprint($blueprint, $request->user());
+
+        return response()->json([
+            'prompt' => $prompt,
+            'format' => $blueprint->format,
+            'voice_perspective' => $blueprint->voice_perspective,
+        ]);
+    }
+
+    /**
+     * Preview prompt sebelum generate — dari form Brief Studio / Blueprints.
+     */
+    public function previewMasterPrompt(Request $request, BlueprintGeneratorService $generator): JsonResponse
+    {
+        $formatList = implode(',', BlueprintGeneratorService::FORMATS);
+        $data = $request->validate([
+            'topic' => ['nullable', 'string', 'max:500'],
+            'content_idea_id' => ['nullable', 'exists:content_ideas,id'],
+            'format' => ['nullable', 'in:'.$formatList],
+            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:3600'],
+            'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:60'],
+            'visual_beat_seconds' => ['nullable', 'integer', 'min:5', 'max:30'],
+            'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+            'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+            'prefer_stock' => ['sometimes', 'boolean'],
+            'voice_perspective' => ['nullable', 'string', 'max:40'],
+            'title' => ['nullable', 'string', 'max:300'],
+        ]);
+
+        $user = $request->user();
+        $idea = null;
+        $topic = trim((string) ($data['topic'] ?? ''));
+        if (! empty($data['content_idea_id'])) {
+            $idea = ContentIdea::query()->findOrFail($data['content_idea_id']);
+            abort_unless($idea->user_id === $user->id, 403);
+            if ($topic === '') {
+                $topic = (string) ($idea->title ?: $idea->hook ?: $idea->topic_cluster ?: 'Topik');
+            }
+        }
+        abort_unless($topic !== '', 422, 'topic atau content_idea_id wajib.');
+
+        $format = $data['format'] ?? BlueprintGeneratorService::FORMAT_REELS_VO;
+        $options = array_filter([
+            'duration_seconds' => $data['duration_seconds'] ?? null,
+            'duration_minutes' => $data['duration_minutes'] ?? null,
+            'visual_beat_seconds' => $data['visual_beat_seconds'] ?? $data['beat_seconds'] ?? null,
+            'vo_beat_seconds' => $data['vo_beat_seconds'] ?? null,
+            'beat_seconds' => $data['visual_beat_seconds'] ?? $data['beat_seconds'] ?? null,
+            'prefer_stock' => array_key_exists('prefer_stock', $data) ? (bool) $data['prefer_stock'] : null,
+            'voice_perspective' => $data['voice_perspective'] ?? null,
+            'title' => $data['title'] ?? null,
+        ], fn ($v) => $v !== null);
+
+        $prompt = $generator->buildExportableMasterPrompt(
+            $user,
+            $topic,
+            $format,
+            $options,
+            BrandKit::defaultFor($user),
+            $idea
+        );
+
+        return response()->json([
+            'prompt' => $prompt,
+            'format' => $format,
+        ]);
+    }
 }

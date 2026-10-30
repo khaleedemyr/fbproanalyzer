@@ -1121,7 +1121,8 @@ PROMPT;
     }
 
     /**
-     * Sesuaikan panjang naskah ke beat (hindari VO pendek di beat 10s).
+     * Sesuaikan panjang naskah ke beat.
+     * Jangan nempel klausa kaku — lebih baik VO sedikit pendek daripada bunyi robot.
      */
     protected function fitVoToBeat(string $vo, string $topic, string $section = ''): string
     {
@@ -1132,25 +1133,8 @@ PROMPT;
 
         $t = $this->targetVoWords();
         $words = preg_split('/\s+/u', $vo) ?: [];
-        $vp = $this->voicePerspective;
 
-        if (count($words) < $t['min']) {
-            // Panjangin kalimat yang sama (klausa), jangan nempel meta/tips baru.
-            $seed = abs(crc32($vo.'|'.$section));
-            $clauses = [
-                " dan {$vp} merasakannya secara langsung",
-                ' sampai biayanya terasa di dada',
-                ' tanpa ruang untuk mengelak',
-                " sementara {$vp} masih mencoba memahami urutannya",
-            ];
-            $i = 0;
-            while (count($words) < $t['min'] && $i < 6) {
-                $vo = rtrim($vo, " \t.。").$clauses[($seed + $i) % count($clauses)].'.';
-                $words = preg_split('/\s+/u', $vo) ?: [];
-                $i++;
-            }
-        }
-
+        // Hanya potong kalau kepanjangan. Jangan pad klausa palsu.
         if (count($words) > $t['max']) {
             $vo = implode(' ', array_slice($words, 0, $t['max']));
             if (! preg_match('/[.!?…]$/u', $vo)) {
@@ -1162,7 +1146,7 @@ PROMPT;
     }
 
     /**
-     * Buang label internal (GOLDEN HOOK / BAB / Lanjut benang) dari teks yang dibaca VO.
+     * Buang label internal + sisa filler kaku dari teks yang dibaca VO.
      */
     protected function sanitizeSpokenVo(string $vo): string
     {
@@ -1171,12 +1155,98 @@ PROMPT;
         $vo = preg_replace('/\b(GOLDEN\s*HOOK|BAB\s*\d+|PENUTUP|BUMPER)\s*:\s*/iu', '', $vo) ?? $vo;
         $vo = preg_replace('/\buji satu situasi nyata\b.*$/iu', '', $vo) ?? $vo;
         $vo = preg_replace('/\bsupaya polanya kebaca\.?\s*$/iu', '', $vo) ?? $vo;
+        // Sisa filler pad lama yang bikin kalimat kaku.
+        $vo = preg_replace('/\s*(dan\s+)?(aku|kita)\s+merasakannya secara langsung\.?/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\s*sementara\s+(aku|kita)\s+masih mencoba memahami urutannya\.?/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\s*tanpa ruang untuk mengelak\.?/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\s*sampai biayanya terasa di dada\.?/iu', '', $vo) ?? $vo;
+        $vo = preg_replace('/\s*membuat sementara\b/iu', 'membuat', $vo) ?? $vo;
+        $vo = trim(preg_replace('/\s+/u', ' ', $vo) ?? $vo);
+        $vo = trim($vo, " \t:-");
+        if ($vo !== '' && ! preg_match('/[.!?…]$/u', $vo)) {
+            $vo .= '.';
+        }
         // Buang bridge/meta yang sering merusak naskah.
         if ($this->looksLikeGenericBridge($vo) || $this->looksLikeMetaVo($vo)) {
             return '';
         }
 
-        return trim($vo, " \t:-");
+        return $vo;
+    }
+
+    /**
+     * Prompt siap tempel ke AI lain (ChatGPT/Claude/Gemini) untuk generate blueprint.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    public function buildExportableMasterPrompt(
+        User $user,
+        string $topic,
+        string $format = self::FORMAT_REELS_VO,
+        array $options = [],
+        ?BrandKit $brandKit = null,
+        ?ContentIdea $idea = null,
+    ): string {
+        $kit = $brandKit ?? BrandKit::defaultFor($user);
+        $format = $this->normalizeFormat($format);
+        $this->currentFormat = $format;
+        $this->applyDurationOptions($format, $options);
+        $this->voicePerspective = $this->normalizeVoicePerspective(
+            (string) ($options['voice_perspective'] ?? ($kit->voice_perspective ?: 'Aku'))
+        );
+
+        $title = trim((string) ($options['title'] ?? $topic)) ?: $topic;
+        $radar = trim((string) ($options['radar_context'] ?? ''));
+        $core = $format === self::FORMAT_REELS_PANJANG
+            ? $this->geminiLongPrompt($kit, $title, $topic, $idea, $radar)
+            : $this->geminiShortPrompt($kit, $title, $topic, $idea, $radar);
+
+        $natural = <<<'EXTRA'
+
+===== GAYA BAHASA (WAJIB) =====
+- Bahasa Indonesia lisan natural, seperti ngomong ke kamera — bukan esai kaku.
+- Hindari klausa robot: "merasakannya secara langsung", "memahami urutannya", "tanpa ruang untuk mengelak".
+- Satu beat = satu ide jelas. Kalimat mengalir sebab→akibat.
+- Nama tokoh tulis natural (jangan kapitalisasi aneh di tengah kalimat kecuali nama diri).
+EXTRA;
+
+        $header = "PROMPT GENERATE BLUEPRINT — tempel ke AI lain (ChatGPT / Claude / Gemini)\n"
+            ."Format: {$format} · Durasi: {$this->durationSeconds}s · Visual beat: {$this->beatSeconds}s · Naskah beat: {$this->voBeatSeconds}s\n"
+            ."Sudut VO: {$this->voicePerspective}\n"
+            ."---\n";
+
+        return $header.$core."\n".$natural;
+    }
+
+    /**
+     * Prompt master dari blueprint yang sudah ada (pakai setting tersimpan).
+     */
+    public function buildExportableMasterPromptForBlueprint(ContentBlueprint $blueprint, User $user): string
+    {
+        $kit = $blueprint->brandKit ?? BrandKit::defaultFor($user);
+        $idea = $blueprint->contentIdea;
+        $options = [
+            'duration_seconds' => (int) ($blueprint->duration_seconds ?: $this->durationSeconds),
+            'visual_beat_seconds' => (int) ($blueprint->beat_seconds ?: 15),
+            'vo_beat_seconds' => (int) ($blueprint->vo_beat_seconds ?: $blueprint->beat_seconds ?: 10),
+            'voice_perspective' => (string) ($blueprint->voice_perspective ?: 'Aku'),
+            'title' => (string) ($blueprint->cover_theme ?: $blueprint->title ?: ''),
+            'prefer_stock' => (bool) ($blueprint->prefer_stock ?? false),
+        ];
+        if ($blueprint->series_title) {
+            $options['radar_context'] = 'Sequel series: '.$blueprint->series_title
+                .($blueprint->episode_number ? ' Ep '.$blueprint->episode_number : '')
+                .'. Lanjutkan benang cerita yang sama, jangan ulang Ep sebelumnya.';
+        }
+
+        return $this->buildExportableMasterPrompt(
+            $user,
+            (string) ($blueprint->source_topic ?: $blueprint->title ?: 'Topik'),
+            (string) ($blueprint->format ?: self::FORMAT_REELS_VO),
+            $options,
+            $kit,
+            $idea
+        );
     }
 
     /**
@@ -2592,14 +2662,14 @@ TXT;
         $salt = abs(crc32($who.'|'.$event.'|'.$idx.'|'.$coverTheme));
 
         $candidates = [
-            "{$who} terus menggeser bingkai: {$event}, dan {$vp} mulai kehilangan pijakan.",
-            "Di titik ini {$who} memakai {$event} sebagai alasan supaya {$vp} merasa berhutang.",
-            "Yang {$vp} lihat berikutnya: setelah {$event}, permintaan {$who} datang lebih sering.",
-            "{$event} bukan kebetulan — {$who} membangun pola sampai {$vp} ragu pada intuisi sendiri.",
-            "Kalau diurutkan, {$who} selalu tenang saat {$vp} goyah karena {$event}.",
-            "{$vp} mulai menghitung biaya dari {$event}: tiap kali menolong {$who}, batas makin tipis.",
-            "Dari {$event}, {$who} menarik {$vp} masuk lebih dalam ke {$shortTopic} tanpa teriakan.",
-            "{$who} tidak perlu memaksa keras; {$event} sudah cukup membuat {$vp} menyerahkan kendali pelan-pelan.",
+            "{$who} terus main di situ: {$event}. Pelan-pelan {$vp} kehilangan pijakan.",
+            "Lihat polanya: {$who} pakai {$event} biar {$vp} merasa berhutang.",
+            "Habis {$event}, permintaan {$who} datang lebih sering — dan {$vp} sulit bilang tidak.",
+            "{$event} bukan kebetulan. {$who} bangun pola sampai {$vp} ragu sama firasat sendiri.",
+            "Anehnya {$who} selalu tenang pas {$vp} goyah karena {$event}.",
+            "Tiap kali {$vp} 'menolong' soal {$event}, batas {$vp} makin tipis.",
+            "Dari {$event}, {$who} narik {$vp} masuk lebih dalam ke {$shortTopic} tanpa teriak.",
+            "{$who} nggak perlu maksa. {$event} sudah cukup bikin {$vp} lepas kendali pelan-pelan.",
         ];
 
         for ($i = 0; $i < count($candidates); $i++) {
@@ -2814,11 +2884,11 @@ KALIMAT SEBELUMNYA (lanjutkan dari sini, jangan mengulang):
 
 Tulis TEPAT {$want} kalimat berikutnya.
 Aturan ketat:
-- Ini CERITA / kronologi yang maju (sebab→akibat / adegan→adegan), BUKAN tips generik.
-- Satu kalimat = satu beat ±{$voBeatSec}s ({$voMin}-{$voMax} kata).
-- Pakai tokoh/peristiwa dari benih kalau ada (jangan ganti jadi tips abstrak).
-- DILARANG KERAS (meta/internal): mengutip kalimat sebelumnya dengan tanda kutip, "Apa yang terjadi setelah", "masih di adegan", "loncat ke tips", "alurnya terus jalan", "lanjut dari tadi", "Coba bayangkan", "Lanjut benang", label BAB/HOOK, Poin/Latihan N.
-- Tulis narasi yang bisa dibaca penonton langsung — bukan komentar tentang naskah.
+- Bahasa lisan natural (ngomong ke kamera), bukan esai kaku / novel.
+- CERITA maju (sebab→akibat). Bukan tips generik.
+- Satu kalimat = satu beat ±{$voBeatSec}s ({$voMin}-{$voMax} kata). Boleh sedikit di bawah min jika bunyi lebih natural.
+- Pakai tokoh/peristiwa dari benih. Jangan nempel klausa robot ("merasakannya secara langsung", "memahami urutannya").
+- DILARANG: mengutip kalimat sebelumnya, "Apa yang terjadi setelah", "masih di adegan", "loncat ke tips", "alurnya terus jalan", "lanjut dari tadi", "Coba bayangkan", "Lanjut benang", label BAB/HOOK.
 
 JSON SAJA: {"lines":["..."]}
 PROMPT;

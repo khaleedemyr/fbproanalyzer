@@ -250,6 +250,34 @@ async function compose() {
     }
 }
 
+async function copyMasterPrompt() {
+    message.value = '';
+    error.value = '';
+    try {
+        const payload = {
+            topic: (topic.value || editTitle.value || brief.value?.working_title || '').trim() || 'Topik',
+            format: format.value,
+            title: (editTitle.value || brief.value?.working_title || '').trim() || undefined,
+            voice_perspective: voicePerspective.value || 'Aku',
+        };
+        if (isLong.value) {
+            payload.duration_minutes = Number(durationMinutes.value);
+            payload.visual_beat_seconds = Number(visualBeatSeconds.value);
+            payload.vo_beat_seconds = Number(voBeatSeconds.value);
+            payload.prefer_stock = !!preferStock.value;
+        } else if (isText.value) {
+            payload.duration_seconds = Number(textDurationSeconds.value);
+        } else if (isVo.value) {
+            payload.duration_seconds = Number(durationSeconds.value);
+        }
+        const { data } = await http.post('/blueprints/master-prompt', payload);
+        await navigator.clipboard.writeText(data.prompt || '');
+        message.value = 'Prompt blueprint disalin — tempel ke ChatGPT/Claude/Gemini untuk dicoba.';
+    } catch (e) {
+        error.value = apiError(e, 'Gagal membuat prompt master.');
+    }
+}
+
 async function makeBlueprint() {
     if (!brief.value?.id) return;
     generating.value = true;
@@ -561,6 +589,14 @@ onMounted(async () => {
                         @click="makeBlueprint"
                     >
                         {{ generating ? 'Memulai…' : (isLong ? 'Generate 5–60 mnt (background)' : 'Generate Blueprint dari Resume') }}
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100"
+                        title="Salin prompt sistem untuk dicoba di AI lain"
+                        @click="copyMasterPrompt"
+                    >
+                        Copy prompt AI lain
                     </button>
                 </div>
             </div>

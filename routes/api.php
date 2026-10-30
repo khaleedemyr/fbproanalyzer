@@ -84,8 +84,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('blueprints', [BlueprintController::class, 'index']);
     Route::post('blueprints/generate', [BlueprintController::class, 'generate']);
+    Route::post('blueprints/master-prompt', [BlueprintController::class, 'previewMasterPrompt']);
     Route::get('blueprints/{blueprint}', [BlueprintController::class, 'show']);
     Route::get('blueprints/{blueprint}/progress', [BlueprintController::class, 'progress']);
+    Route::get('blueprints/{blueprint}/master-prompt', [BlueprintController::class, 'masterPrompt']);
     Route::post('blueprints/{blueprint}/finish-generate', [BlueprintController::class, 'finishGenerate']);
     Route::patch('blueprints/{blueprint}', [BlueprintController::class, 'update']);
     Route::delete('blueprints/{blueprint}', [BlueprintController::class, 'destroy']);

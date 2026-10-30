@@ -330,6 +330,17 @@ async function copyText(text) {
     }
 }
 
+async function copyMasterPrompt() {
+    if (!bp.value?.id) return;
+    try {
+        const { data } = await http.get(`/blueprints/${bp.value.id}/master-prompt`);
+        await copyText(data.prompt || '');
+        message.value = 'Prompt blueprint disalin — tempel ke ChatGPT/Claude/Gemini.';
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal ambil prompt master.';
+    }
+}
+
 onMounted(load);
 onUnmounted(stopPoll);
 </script>
@@ -455,6 +466,14 @@ onUnmounted(stopPoll);
                     Lepas kalender
                 </button>
                 <button type="button" class="rounded-lg border border-slate-200 px-3 py-2 text-sm" @click="copyText(markdown)">Copy semua</button>
+                <button
+                    type="button"
+                    class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100"
+                    title="Prompt yang dipakai sistem — tempel ke AI lain"
+                    @click="copyMasterPrompt"
+                >
+                    Copy prompt AI lain
+                </button>
                 <button type="button" class="rounded-lg px-3 py-2 text-sm text-red-600" @click="removeItem">Hapus</button>
             </div>
         </div>
