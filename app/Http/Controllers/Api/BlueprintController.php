@@ -13,6 +13,8 @@ use App\Support\BlueprintProgress;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class BlueprintController extends Controller
@@ -84,59 +86,118 @@ class BlueprintController extends Controller
     public function finishGenerate(Request $request, ContentBlueprint $blueprint, BlueprintGeneratorService $generator): JsonResponse
     {
         abort_unless($blueprint->user_id === $request->user()->id, 403);
-        @set_time_limit(120);
+        @set_time_limit(180);
         @ini_set('memory_limit', '512M');
+        ignore_user_abort(true);
 
-        if (! in_array($blueprint->status, ['generating', 'failed'], true)) {
+        $lockKey = 'blueprint_finish_lock_'.$blueprint->id;
+        if (! Cache::add($lockKey, 1, now()->addMinutes(3))) {
+            $blueprint->refresh();
             $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
 
             return response()->json([
-                'message' => 'Blueprint sudah selesai.',
+                'message' => 'Generate sedang berjalan — tunggu sebentar.',
                 'data' => $blueprint,
                 'progress' => BlueprintProgress::get($blueprint->id),
+                'busy' => true,
             ]);
         }
-
-        $data = $request->validate([
-            'use_ai' => ['sometimes', 'boolean'],
-        ]);
-
-        $useAi = array_key_exists('use_ai', $data)
-            ? (bool) $data['use_ai']
-            : ($blueprint->engine === 'pending_ai');
-
-        BlueprintProgress::set(
-            $blueprint->id,
-            10,
-            $useAi ? 'Menyelesaikan dengan AI Gemini…' : 'Menyelesaikan generate…',
-            'generating'
-        );
 
         try {
-            $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user(), [
-                'use_ai' => $useAi,
+            if (! in_array($blueprint->status, ['generating', 'failed'], true)) {
+                $blueprint->load(['brandKit', 'analyticsAiAnalysis']);
+
+                return response()->json([
+                    'message' => 'Blueprint sudah selesai.',
+                    'data' => $blueprint,
+                    'progress' => BlueprintProgress::get($blueprint->id),
+                ]);
+            }
+
+            $data = $request->validate([
+                'use_ai' => ['sometimes', 'boolean'],
             ]);
-        } catch (\Throwable $e) {
-            report($e);
-            BlueprintProgress::set($blueprint->id, 0, 'Gagal: '.$e->getMessage(), 'failed');
+
+            $useAi = array_key_exists('use_ai', $data)
+                ? (bool) $data['use_ai']
+                : ($blueprint->engine === 'pending_ai');
+
+            Log::info('blueprint.finish.start', [
+                'blueprint_id' => $blueprint->id,
+                'use_ai' => $useAi,
+                'engine' => $blueprint->engine,
+            ]);
+
+            BlueprintProgress::set(
+                $blueprint->id,
+                10,
+                $useAi ? 'Menyelesaikan dengan AI Gemini…' : 'Menyelesaikan generate…',
+                'generating'
+            );
+
+            try {
+                $bp = $generator->finishGeneratingBlueprint($blueprint, $request->user(), [
+                    'use_ai' => $useAi,
+                ]);
+            } catch (\Throwable $e) {
+                report($e);
+                Log::error('blueprint.finish.fail', [
+                    'blueprint_id' => $blueprint->id,
+                    'use_ai' => $useAi,
+                    'error' => $e->getMessage(),
+                ]);
+                BlueprintProgress::set($blueprint->id, 0, 'Gagal: '.$e->getMessage(), 'failed');
+                $blueprint->refresh();
+
+                return response()->json([
+                    'message' => $useAi
+                        ? ('AI Gemini gagal: '.$e->getMessage().' — tidak memakai template. Klik “Coba AI lagi”.')
+                        : ('Gagal menyelesaikan generate: '.$e->getMessage()),
+                    'data' => $blueprint,
+                    'progress' => BlueprintProgress::get($blueprint->id),
+                    'can_retry_ai' => $useAi,
+                ], 500);
+            }
+
+            // AI diminta tapi hasilnya bukan gemini → anggap gagal (jangan simpan sebagai template).
+            if ($useAi && $bp->engine !== 'gemini') {
+                $bp->forceFill([
+                    'status' => 'failed',
+                    'engine' => 'failed',
+                    'story_concept' => 'AI Gemini tidak menghasilkan kerangka. Tidak memakai template.',
+                    'scenes' => [],
+                ])->save();
+                BlueprintProgress::set($bp->id, 0, 'AI gagal — tidak pakai template', 'failed');
+
+                return response()->json([
+                    'message' => 'AI Gemini tidak menghasilkan kerangka — tidak memakai template. Klik “Coba AI lagi”.',
+                    'data' => $bp->fresh(),
+                    'progress' => BlueprintProgress::get($bp->id),
+                    'can_retry_ai' => true,
+                ], 500);
+            }
+
+            $bp->load(['brandKit', 'analyticsAiAnalysis']);
+            BlueprintProgress::done($bp->id, 'Blueprint siap');
+
+            Log::info('blueprint.finish.ok', [
+                'blueprint_id' => $bp->id,
+                'engine' => $bp->engine,
+                'scenes' => count($bp->scenes ?? []),
+            ]);
 
             return response()->json([
-                'message' => 'Gagal menyelesaikan generate: '.$e->getMessage(),
-            ], 500);
+                'message' => $bp->engine === 'gemini'
+                    ? 'Blueprint panjang siap (AI Gemini + expand timeline).'
+                    : 'Blueprint panjang siap.',
+                'data' => $bp,
+                'engine' => $bp->engine,
+                'warning' => $generator->lastWarning(),
+                'progress' => BlueprintProgress::get($bp->id),
+            ]);
+        } finally {
+            Cache::forget($lockKey);
         }
-
-        $bp->load(['brandKit', 'analyticsAiAnalysis']);
-        BlueprintProgress::done($bp->id, 'Blueprint siap');
-
-        return response()->json([
-            'message' => $bp->engine === 'gemini'
-                ? 'Blueprint panjang siap (AI Gemini + expand timeline).'
-                : 'Blueprint panjang siap (template + expand).',
-            'data' => $bp,
-            'engine' => $bp->engine,
-            'warning' => $generator->lastWarning(),
-            'progress' => BlueprintProgress::get($bp->id),
-        ]);
     }
 
     public function generate(Request $request, BlueprintGeneratorService $generator): JsonResponse

@@ -120,10 +120,31 @@ async function finishNow(forceAi = null) {
             error.value = bp.value.story_concept || 'Generate gagal.';
         }
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal menyelesaikan generate.';
+        const msg = e.response?.data?.message
+            || (e.code === 'ECONNABORTED' ? 'Timeout menunggu AI Gemini. Klik “Coba AI lagi”.' : null)
+            || 'Gagal menyelesaikan generate.';
+        error.value = msg;
+        if (e.response?.data?.data) {
+            bp.value = e.response.data.data;
+        }
+        if (e.response?.data?.progress) {
+            progress.value = e.response.data.progress;
+        }
+        // Tetap bisa retry AI — jangan auto-template.
+        if (bp.value) {
+            bp.value = { ...bp.value, status: 'failed', engine: 'pending_ai' };
+        }
     } finally {
         finishing.value = false;
     }
+}
+
+async function retryAi() {
+    if (!bp.value?.id) return;
+    bp.value = { ...bp.value, status: 'generating', engine: 'pending_ai' };
+    error.value = '';
+    finishRequested = false;
+    await finishNow(true);
 }
 
 function startPoll() {
@@ -262,8 +283,16 @@ onUnmounted(stopPoll);
                 {{ finishing ? 'Menyelesaikan…' : 'Selesaikan sekarang' }}
             </button>
         </div>
-        <div v-if="isFailed" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {{ bp?.story_concept || 'Generate gagal.' }}
+        <div v-if="isFailed || error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <p>{{ error || bp?.story_concept || 'Generate gagal.' }}</p>
+            <button
+                type="button"
+                class="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                :disabled="finishing"
+                @click="retryAi"
+            >
+                {{ finishing ? 'Menyiapkan AI…' : 'Coba AI lagi' }}
+            </button>
         </div>
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>

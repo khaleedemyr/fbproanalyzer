@@ -233,8 +233,10 @@ class BriefStudioService
 
         $visualBeat = $options['visual_beat_seconds'] ?? $options['beat_seconds'] ?? null;
         $isLong = $format === BlueprintGeneratorService::FORMAT_REELS_PANJANG;
-        // Background: AI ON by default (bisa 1 jam). Sync pendek: AI ON.
-        $useAi = array_key_exists('use_ai', $options) ? (bool) $options['use_ai'] : true;
+        // Video panjang: AI wajib (tidak ada fallback template).
+        $useAi = $isLong
+            ? true
+            : (array_key_exists('use_ai', $options) ? (bool) $options['use_ai'] : true);
 
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,

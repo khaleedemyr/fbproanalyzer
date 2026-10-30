@@ -169,6 +169,13 @@ class BlueprintGeneratorService
                 $this->lastWarning = 'AI Gemini menulis kerangka naskah; sistem menyesuaikan ke durasi penuh (visual '.$this->beatSeconds.'s · naskah '.$this->voBeatSeconds.'s).';
             }
         } else {
+            // Video panjang + AI wajib: jangan pernah jatuh ke template.
+            if ($format === self::FORMAT_REELS_PANJANG && $useAi && ! $skipAi) {
+                $why = $this->lastWarning ?: 'Gemini tidak mengembalikan kerangka naskah.';
+                $this->reportProgress(0, 'AI gagal: '.$why, 'failed');
+                throw new \RuntimeException('AI Gemini gagal — blueprint panjang tidak memakai template. '.$why);
+            }
+
             $this->reportProgress(28, 'Menyusun template bab + naskah…');
             $payload = match ($format) {
                 self::FORMAT_REELS_PANJANG => $this->buildLongTemplate($kit, $cleanTitle, $cleanTopic, $idea),
@@ -324,12 +331,12 @@ class BlueprintGeneratorService
         }
     }
 
-    protected function reportProgress(int $percent, string $message): void
+    protected function reportProgress(int $percent, string $message, string $status = 'generating'): void
     {
         if (! $this->progressBlueprintId) {
             return;
         }
-        BlueprintProgress::set($this->progressBlueprintId, $percent, $message, 'generating');
+        BlueprintProgress::set($this->progressBlueprintId, $percent, $message, $status);
     }
 
     /**
@@ -467,31 +474,49 @@ class BlueprintGeneratorService
             ? (bool) $extra['use_ai']
             : ($stub->engine === 'pending_ai');
 
+        $baseOptions = [
+            'duration_minutes' => $minutes,
+            'duration_seconds' => (int) ($stub->duration_seconds ?: $minutes * 60),
+            'visual_beat_seconds' => (int) ($stub->beat_seconds ?: 10),
+            'vo_beat_seconds' => (int) ($stub->vo_beat_seconds ?: 5),
+            'prefer_stock' => (bool) $stub->prefer_stock,
+            'voice_perspective' => (string) ($stub->voice_perspective ?: 'Aku'),
+            'content_brief_id' => $stub->content_brief_id,
+            'analytics_ai_analysis_id' => $stub->analytics_ai_analysis_id,
+            'angle_finding_id' => $stub->angle_finding_id,
+            'force' => true,
+            'background' => true,
+            'use_ai' => $wantAi,
+            'skip_ai' => ! $wantAi,
+        ];
+
+        // AI dicentang = wajib Gemini. Gagal = throw (tidak pernah template).
         if ($wantAi) {
             BlueprintProgress::set($stub->id, 15, 'Memanggil AI Gemini untuk kerangka naskah…', 'generating');
+            $stub->forceFill(['engine' => 'pending_ai', 'status' => 'generating'])->save();
+        } else {
+            BlueprintProgress::set($stub->id, 35, 'Expand timeline…', 'generating');
         }
 
-        return $this->fillExistingBlueprint(
-            $stub,
-            $user,
-            $topic,
-            (string) ($stub->format ?: self::FORMAT_REELS_PANJANG),
-            [
-                'duration_minutes' => $minutes,
-                'duration_seconds' => (int) ($stub->duration_seconds ?: $minutes * 60),
-                'visual_beat_seconds' => (int) ($stub->beat_seconds ?: 10),
-                'vo_beat_seconds' => (int) ($stub->vo_beat_seconds ?: 5),
-                'prefer_stock' => (bool) $stub->prefer_stock,
-                'voice_perspective' => (string) ($stub->voice_perspective ?: 'Aku'),
-                'content_brief_id' => $stub->content_brief_id,
-                'analytics_ai_analysis_id' => $stub->analytics_ai_analysis_id,
-                'angle_finding_id' => $stub->angle_finding_id,
-                'use_ai' => $wantAi,
-                'skip_ai' => ! $wantAi,
-                'force' => true,
-                'background' => true,
-            ]
-        );
+        try {
+            return $this->fillExistingBlueprint(
+                $stub,
+                $user,
+                $topic,
+                (string) ($stub->format ?: self::FORMAT_REELS_PANJANG),
+                $baseOptions
+            );
+        } catch (\Throwable $e) {
+            if ($wantAi) {
+                $stub->forceFill([
+                    'status' => 'failed',
+                    'engine' => 'failed',
+                    'story_concept' => 'AI Gemini gagal: '.$e->getMessage(),
+                ])->save();
+                BlueprintProgress::set($stub->id, 0, 'AI gagal: '.$e->getMessage(), 'failed');
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -716,7 +741,7 @@ class BlueprintGeneratorService
     ): ?array {
         $apiKey = trim((string) config('blueprint.gemini_api_key', ''), " \t\n\r\0\x0B\"'");
         if ($apiKey === '') {
-            $this->lastWarning = 'GEMINI_API_KEY belum terisi / belum kebaca config. Fallback template.';
+            $this->lastWarning = 'GEMINI_API_KEY belum terisi / belum kebaca config.';
 
             return null;
         }
@@ -737,8 +762,8 @@ class BlueprintGeneratorService
 
         foreach ($models as $model) {
             try {
-                // Kerangka panjang: timeout sedang (Hostinger ~120s). Gagal → fallback template.
-                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 50 : 55;
+                // Kerangka panjang butuh waktu; Hostinger ~120–180s — sisakan ruang untuk expand.
+                $httpTimeout = $format === self::FORMAT_REELS_PANJANG ? 70 : 55;
                 $response = Http::timeout($httpTimeout)
                     ->withHeaders(['Content-Type' => 'application/json'])
                     ->post(
@@ -838,7 +863,7 @@ class BlueprintGeneratorService
             }
         }
 
-        $this->lastWarning = 'Gemini gagal ('.implode(' | ', $errors).') — pakai template.';
+        $this->lastWarning = 'Gemini gagal ('.implode(' | ', $errors).').';
 
         return null;
     }

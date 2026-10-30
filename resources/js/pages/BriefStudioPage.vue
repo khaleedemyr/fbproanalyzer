@@ -207,7 +207,7 @@ async function makeBlueprint() {
             payload.visual_beat_seconds = Number(visualBeatSeconds.value);
             payload.vo_beat_seconds = Number(voBeatSeconds.value);
             payload.prefer_stock = !!preferStock.value;
-            payload.use_ai = !!useAi.value;
+            payload.use_ai = true;
         } else if (isText.value) {
             payload.duration_seconds = Number(textDurationSeconds.value);
             payload.use_ai = true;
@@ -431,10 +431,9 @@ onMounted(async () => {
                         <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
                         Campur stock
                     </label>
-                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700" title="Centang = Gemini tulis kerangka naskah, lalu expand ke 5–60 menit">
-                        <input v-model="useAi" type="checkbox" class="rounded border-slate-300" />
-                        Pakai AI Gemini (kerangka)
-                    </label>
+                    <p v-if="isLong" class="pb-1.5 text-xs font-medium text-teal-800">
+                        Reels Panjang = AI Gemini wajib (tanpa fallback template)
+                    </p>
                     <button
                         type="button"
                         class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
