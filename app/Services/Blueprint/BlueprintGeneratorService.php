@@ -1073,7 +1073,8 @@ Angle: {$angle}
 Sudut VO: "{$this->voicePerspective}"
 Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
-Struktur: HOOK → BAB1 → bumper → BAB2 → bumper → BAB3 → PENUTUP.
+Struktur: HOOK → BAB1 → bumper(10s) → BAB2 → bumper(10s) → BAB3 → PENUTUP.
+Bumper visual_type "bumper", vo "", durasi 10 detik.
 Hook = cerita nyata tokoh/kasus (tahun + twist).
 
 DILARANG pembuka:
@@ -2137,6 +2138,9 @@ TXT;
             return [];
         }
 
+        $bumperSeconds = 10; // Bumper antar bab selalu 10 detik.
+        $bumperBeatUnits = max(1, (int) ceil($bumperSeconds / $voBeat));
+
         $bumperIdx = [];
         $contentIdx = [];
         foreach ($segments as $i => $seg) {
@@ -2147,7 +2151,7 @@ TXT;
             }
         }
 
-        $bumperBeats = count($bumperIdx); // 1 beat per bumper
+        $bumperBeats = count($bumperIdx) * $bumperBeatUnits;
         $contentBeats = max(count($contentIdx), $target - $bumperBeats);
         $alloc = $this->allocateSegmentBeats($segments, $contentIdx, $contentBeats);
 
@@ -2174,23 +2178,25 @@ TXT;
                 if ($start >= $total) {
                     break 2;
                 }
-                $end = min($total, $start + $voBeat);
 
                 if ($kind === 'bumper') {
+                    $end = min($total, $start + $bumperSeconds);
                     $out[] = [
                         'section' => 'BUMPER',
                         'timecode' => $this->formatTimecode($start, $end),
                         'visual_type' => 'bumper',
-                        'image_prompt' => 'Bumper KEA Abbasy — logo sting singkat, SFX brand, layar bersih.',
-                        'motion_prompt' => 'Quick logo sting, hold, soft fade.',
+                        'image_prompt' => 'Bumper KEA Abbasy 10 detik — logo sting + SFX brand, layar bersih.',
+                        'motion_prompt' => 'Logo sting, hold ~10s, soft fade out.',
                         'vo' => '',
                         'on_screen' => 'KEA ABBASY',
-                        'beat_seconds' => $voBeat,
+                        'beat_seconds' => $bumperSeconds,
                         'visual_plate' => $sectionPlateBase,
                     ];
-                    $globalBeat++;
+                    $globalBeat += $bumperBeatUnits;
                     continue;
                 }
+
+                $end = min($total, $start + $voBeat);
 
                 $vo = (string) $voLines[$b % $voCount];
                 $cycle = intdiv($b, $voCount);
