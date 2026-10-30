@@ -15,6 +15,10 @@ const brief = ref(null);
 const topic = ref('');
 const format = ref('reels_vo');
 const voicePerspective = ref('Aku');
+const durationSeconds = ref(15);
+const durationMinutes = ref(10);
+const textDurationSeconds = ref(8);
+const preferStock = ref(true);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -22,6 +26,15 @@ const formatLabel = {
     reels_text: 'Reels Text Tempel',
     foto: 'Postingan Foto',
 };
+
+const voDurationOptions = [10, 15, 20, 30, 45, 60];
+const longDurationOptions = [5, 8, 10, 12, 15];
+const textDurationOptions = [5, 6, 8, 10, 12, 15];
+
+const isVo = computed(() => format.value === 'reels_vo');
+const isLong = computed(() => format.value === 'reels_panjang');
+const isText = computed(() => format.value === 'reels_text');
+const needsVoice = computed(() => isVo.value || isLong.value);
 
 const resume = computed(() => brief.value?.resume || {});
 const warnings = computed(() => sources.value?.warnings || brief.value?.inputs_snapshot?.warnings || []);
@@ -99,13 +112,25 @@ async function makeBlueprint() {
     message.value = '';
     error.value = '';
     try {
+        const payload = {
+            format: format.value,
+            force: true,
+        };
+        if (needsVoice.value) {
+            payload.voice_perspective = voicePerspective.value || 'Aku';
+        }
+        if (isLong.value) {
+            payload.duration_minutes = Number(durationMinutes.value);
+            payload.prefer_stock = !!preferStock.value;
+        } else if (isText.value) {
+            payload.duration_seconds = Number(textDurationSeconds.value);
+        } else if (isVo.value) {
+            payload.duration_seconds = Number(durationSeconds.value);
+        }
+
         const { data } = await http.post(
             `/brief-studio/${brief.value.id}/blueprint`,
-            {
-                format: format.value,
-                voice_perspective: voicePerspective.value,
-                force: true,
-            },
+            payload,
             { timeout: 180000 }
         );
         message.value = data.message;
@@ -247,14 +272,37 @@ onMounted(async () => {
                             <option v-for="(label, key) in formatLabel" :key="key" :value="key">{{ label }}</option>
                         </select>
                     </label>
-                    <label class="text-sm">
+                    <label v-if="isVo" class="text-sm">
+                        <span class="mb-1 block text-[11px] font-semibold text-slate-500">Durasi (detik)</span>
+                        <select v-model.number="durationSeconds" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                            <option v-for="s in voDurationOptions" :key="s" :value="s">{{ s }} dtk · {{ s / 5 }} beat</option>
+                        </select>
+                    </label>
+                    <label v-else-if="isLong" class="text-sm">
+                        <span class="mb-1 block text-[11px] font-semibold text-slate-500">Durasi (menit)</span>
+                        <select v-model.number="durationMinutes" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                            <option v-for="m in longDurationOptions" :key="m" :value="m">{{ m }} mnt · ~{{ (m * 60) / 5 }} beat</option>
+                        </select>
+                    </label>
+                    <label v-else-if="isText" class="text-sm">
+                        <span class="mb-1 block text-[11px] font-semibold text-slate-500">Durasi i2v</span>
+                        <select v-model.number="textDurationSeconds" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                            <option v-for="s in textDurationOptions" :key="s" :value="s">{{ s }} detik</option>
+                        </select>
+                    </label>
+                    <label v-if="needsVoice" class="text-sm">
                         <span class="mb-1 block text-[11px] font-semibold text-slate-500">Sudut VO</span>
                         <select v-model="voicePerspective" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
                             <option>Aku</option>
                             <option>Saya</option>
                             <option>Gue</option>
                             <option>Kamu</option>
+                            <option>Kita</option>
                         </select>
+                    </label>
+                    <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700">
+                        <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
+                        Utamakan stock
                     </label>
                     <button
                         type="button"
