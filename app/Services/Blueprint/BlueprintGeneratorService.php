@@ -2155,17 +2155,12 @@ TXT;
         $contentBeats = max(count($contentIdx), $target - $bumperBeats);
         $alloc = $this->allocateSegmentBeats($segments, $contentIdx, $contentBeats);
 
-        // 1 kalimat VO ≈ durasi plate visual — cerita maju, bukan ganti topik tiap 5 dtk.
-        $secondsPerVo = max($visualBeat, $voBeat * 2);
+        // 1 kalimat VO unik per beat naskah (kalau visual=naskah=10s → tiap 10s beda).
+        // Cap 36/bab supaya Gemini masih kuat; kalau beat > 36, baru 1 kalimat dipakai >1 beat.
         $expandJobs = [];
         foreach ($contentIdx as $i) {
             $beatsHere = max(1, (int) ($alloc[$i] ?? 1));
-            $secBudget = $beatsHere * $voBeat;
-            $linesNeeded = max(
-                count($segments[$i]['vo_lines'] ?? []),
-                (int) ceil($secBudget / $secondsPerVo)
-            );
-            $linesNeeded = min(28, max(3, $linesNeeded));
+            $linesNeeded = min(36, max(count($segments[$i]['vo_lines'] ?? []), $beatsHere, 2));
             $expandJobs[$i] = [
                 'section' => (string) ($segments[$i]['section'] ?? 'BAB'),
                 'need' => $linesNeeded,
@@ -2239,9 +2234,11 @@ TXT;
                 }
 
                 $end = min($total, $start + $voBeat);
-                // Map beat → kalimat berurutan (beberapa beat boleh 1 kalimat yang sama = waktu bicara wajar).
-                $lineIdx = (int) min($voCount - 1, floor(($b + 0.0001) * $voCount / $beatsHere));
-                $vo = (string) ($voLines[$lineIdx] ?? '');
+                // 1:1 kalau jumlah kalimat cukup; kalau tidak, sebar merata tanpa stuck di index 0.
+                $lineIdx = $voCount >= $beatsHere
+                    ? $b
+                    : (int) min($voCount - 1, intdiv($b * $voCount, max(1, $beatsHere)));
+                $vo = trim((string) ($voLines[$lineIdx] ?? ''));
                 $on = $this->onScreenFromVo($vo, $onSeed, $coverTheme, $lineIdx === 0);
                 $localPlate = intdiv($b * $voBeat, $visualBeat);
 
@@ -2261,7 +2258,9 @@ TXT;
             }
         }
 
-        // Collapse UI rows: gabung beat berurutan dengan VO sama jadi 1 kartu naskah (durasi lebih panjang).
+        // Safety: beat berurutan jangan naskah kembar (perbaiki sisa bug expand).
+        $out = $this->dedupeConsecutiveVoRows($out, $topic, $coverTheme);
+        // Gabung HANYA kalau benar-benar sisa kembar setelah dedupe (jarang).
         $out = $this->collapseIdenticalVoBeats($out, $total);
 
         // Image prompt per plate dari VO plate itu (setelah collapse, pakai vo baris).
@@ -2287,6 +2286,68 @@ TXT;
         }
 
         return $out;
+    }
+
+    /**
+     * Ganti naskah kembar berurutan jadi kalimat lanjut (visual ikut beda).
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    protected function dedupeConsecutiveVoRows(array $rows, string $topic, string $coverTheme): array
+    {
+        $prevFp = null;
+        $step = 0;
+        foreach ($rows as $i => $row) {
+            $type = Str::lower((string) ($row['visual_type'] ?? 'ai'));
+            if (in_array($type, ['bumper', 'black'], true)) {
+                $prevFp = null;
+                continue;
+            }
+            $vo = trim((string) ($row['vo'] ?? ''));
+            $fp = $this->voFingerprint($vo);
+            if ($prevFp !== null && ($fp === $prevFp || $this->voTooSimilarToAny($vo, [($rows[$i - 1]['vo'] ?? '')]))) {
+                $step++;
+                $section = (string) ($row['section'] ?? 'BAB');
+                $fresh = $this->bridgeAfterVo(
+                    (string) ($rows[$i - 1]['vo'] ?? ''),
+                    $section,
+                    $topic,
+                    $coverTheme,
+                    $step
+                );
+                $rows[$i]['vo'] = $fresh;
+                $rows[$i]['on_screen'] = $this->onScreenFromVo($fresh, '', $coverTheme, false);
+                // Plate baru supaya visual tidak ikut kembar.
+                $rows[$i]['visual_plate'] = (int) ($rows[$i - 1]['visual_plate'] ?? 0) + 1;
+                $prevFp = $this->voFingerprint($fresh);
+            } else {
+                $prevFp = $fp;
+                $step = 0;
+            }
+        }
+
+        return $rows;
+    }
+
+    protected function bridgeAfterVo(
+        string $prevVo,
+        string $section,
+        string $topic,
+        string $coverTheme,
+        int $step,
+    ): string {
+        $vp = $this->voicePerspective;
+        $clip = Str::limit($this->voFingerprint($prevVo), 48, '');
+        $options = [
+            "Dari situ {$vp} melihat pola yang sama di {$topic}.",
+            'Bukan kebetulan — kerapuhan yang dipamerkan justru jadi umpan.',
+            "Begitu {$vp} masuk mode menyelamatkan, kendali percakapan sudah berpindah.",
+            "Hubungkan ke {$coverTheme}: siapa yang diuntungkan dari rasa iba {$vp}?",
+            "Setelah \"{$clip}\", {$vp} wajib tahan dulu sebelum bereaksi.",
+        ];
+
+        return $options[max(0, $step - 1) % count($options)];
     }
 
     /**
@@ -2317,11 +2378,9 @@ TXT;
                 $cur = $row;
                 continue;
             }
-            $sameVo = trim((string) ($cur['vo'] ?? '')) === $vo
-                && (string) ($cur['section'] ?? '') === (string) ($row['section'] ?? '')
-                && (int) ($cur['visual_plate'] ?? -1) === (int) ($row['visual_plate'] ?? -2);
+            $sameVo = $this->voFingerprint((string) ($cur['vo'] ?? '')) === $this->voFingerprint($vo)
+                && (string) ($cur['section'] ?? '') === (string) ($row['section'] ?? '');
             if ($sameVo) {
-                // Perpanjang timecode & beat_seconds.
                 if (preg_match('/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/', (string) ($cur['timecode'] ?? ''), $m1)
                     && preg_match('/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/', (string) ($row['timecode'] ?? ''), $m2)
                 ) {
