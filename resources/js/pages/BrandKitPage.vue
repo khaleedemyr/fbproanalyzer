@@ -136,10 +136,12 @@ onMounted(load);
             <label class="block text-sm">
                 <span class="mb-1 block text-xs font-semibold text-slate-500">Deskripsi visual karakter (lock)</span>
                 <textarea v-model="form.character_visual" rows="4" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <p class="mt-1 text-[11px] text-slate-500">Ini dikunci ke setiap image prompt. Tulis jelas: stickman wireframe, bukan manusia.</p>
             </label>
             <label class="block text-sm">
-                <span class="mb-1 block text-xs font-semibold text-slate-500">Visual style</span>
+                <span class="mb-1 block text-xs font-semibold text-slate-500">Visual style (lingkungan saja)</span>
                 <textarea v-model="form.visual_style" rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <p class="mt-1 text-[11px] text-amber-800">Jangan tulis “photorealistic person”. Photorealism boleh untuk kota/cahaya saja — karakter tetap stickman.</p>
             </label>
             <label class="block text-sm">
                 <span class="mb-1 block text-xs font-semibold text-slate-500">Hashtag caption default</span>

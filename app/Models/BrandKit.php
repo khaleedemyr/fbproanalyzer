@@ -41,7 +41,7 @@ class BrandKit extends Model
                 'niche' => 'psikologi',
                 'character_name' => 'Stickman Executive',
                 'character_visual' => 'A stickman figure made of thin black wireframe lines, wearing a sharp black executive tuxedo with white shirt and black bowtie. Beside him is a small yellow rubber duck prop. Minimal face, no detailed facial features. Consistent character across all frames.',
-                'visual_style' => 'Cinematic 9:16 vertical, photorealistic Jakarta urban night aesthetic, neon city lights, dramatic rim lighting, shallow depth of field, moody psychology storytelling, high contrast, film still quality.',
+                'visual_style' => 'Cinematic 9:16 vertical. Photorealistic ENVIRONMENT only (Jakarta urban night, neon city lights, dramatic rim lighting, shallow DOF) — the character MUST remain a stickman wireframe figure, never a real human. Moody psychology storytelling, high contrast, film still quality.',
                 'aspect_ratio' => '9:16',
                 'on_screen_font' => 'Anton',
                 'voice_perspective' => 'Aku',

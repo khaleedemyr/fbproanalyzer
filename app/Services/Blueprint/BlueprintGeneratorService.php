@@ -588,14 +588,15 @@ class BlueprintGeneratorService
 Kamu adalah ghostwriter viral Reels psikologi gelap untuk brand "{$kit->name}".
 Tujuan: blueprint yang BERPOTENSI SANGAT VIRAL — bukan konten edukasi biasa.
 
-Karakter visual WAJIB konsisten:
+Karakter visual WAJIB konsisten (LOCK — jangan diganti orang real):
 - Nama: {$kit->character_name}
 - Visual: {$kit->character_visual}
-- Style: {$kit->visual_style}
+- Style lingkungan: {$kit->visual_style}
 - Aspect: {$kit->aspect_ratio}
 - Font on-screen: {$kit->on_screen_font}
 - Sudut VO WAJIB: "{$this->voicePerspective}" — semua kalimat VO pakai sudut ini (bukan ceramah orang ketiga)
 - Hashtag caption: {$kit->caption_hashtags}
+- image_prompt / thumbnail_prompt WAJIB stickman Brand Kit. Photorealism hanya untuk background. DILARANG manusia fotoreal.
 
 Tema: {$title}
 Topik: {$topic}
@@ -726,8 +727,8 @@ TXT;
 Kamu buat blueprint REELS TEXT TEMPEL (gambar diam → image-to-video) untuk brand "{$kit->name}".
 Tujuan: orang yang scroll LANGSUNG paham masalah + solusinya. Jangan abu-abu.
 
-Karakter: {$kit->character_name} — {$char}
-Style: {$kit->visual_style}
+Karakter WAJIB (LOCK): {$kit->character_name} — {$char}
+Style lingkungan (bukan tubuh karakter): {$kit->visual_style}
 Aspect: {$kit->aspect_ratio}
 Font teks: {$kit->on_screen_font}
 Hashtag: {$kit->caption_hashtags}
@@ -743,11 +744,12 @@ Angle: {$angle}
 
 WAJIB TEKNIS:
 1) cover_theme = 2 BARIS BESAR dipisah " | " (contoh: "CINTA BERACUN BUKAN CINTA | JIKA TERUS CEMAS — PERGI"). UPPERCASE. Max 12 kata total.
-2) image_prompt = 1 prompt lengkap. Bake judul 2 baris BESAR + footer KECIL (lihat aturan di atas). User TIDAK edit teks.
-3) motion_prompt = image-to-video {$dur}s, semua teks tetap tajam/tidak bergeser.
+2) image_prompt = 1 prompt lengkap. MULAI dengan deskripsi stickman Brand Kit di atas. Bake judul 2 baris BESAR + footer KECIL. User TIDAK edit teks.
+3) motion_prompt = image-to-video {$dur}s, semua teks tetap tajam/tidak bergeser. Karakter tetap stickman.
 4) caption WAJIB lengkap (solusi + ajakan like/share/follow) + hashtag.
 5) 1 scene: image_prompt + motion_prompt + on_screen = cover_theme (pakai newline atau " | ").
 
+LOCK KARAKTER: photorealism HANYA untuk background/kota/cahaya. Karakter = stickman wireframe tuxedo + bebek kuning. DILARANG orang real / wajah manusia / kulit fotoreal.
 DILARANG teks klise: {$banned}
 DILARANG cover cuma label tema tanpa solusi (contoh jelek: "TERJEBAK DALAM CINTA BERACUN").
 DILARANG lupa footer kecil "lihat caption" + like/share/follow di image_prompt.
@@ -774,8 +776,8 @@ PROMPT;
 Kamu buat blueprint POSTINGAN FOTO untuk brand "{$kit->name}".
 Tujuan: 1 foto = pesan jelas (masalah + solusi). Jangan abu-abu / puitis kosong.
 
-Karakter: {$kit->character_name} — {$char}
-Style: {$kit->visual_style}
+Karakter WAJIB (LOCK): {$kit->character_name} — {$char}
+Style lingkungan (bukan tubuh karakter): {$kit->visual_style}
 Aspect: {$kit->aspect_ratio} (boleh 4:5 feed)
 Font teks: {$kit->on_screen_font}
 Hashtag: {$kit->caption_hashtags}
@@ -790,11 +792,12 @@ Angle: {$angle}
 
 WAJIB TEKNIS:
 1) cover_theme = 2 BARIS BESAR dipisah " | " (hook tajam + perintah/solusi). UPPERCASE. Max 12 kata.
-2) image_prompt = 1 prompt generate image. Bake judul 2 baris BESAR + footer KECIL (lihat aturan). User TIDAK edit teks.
+2) image_prompt = 1 prompt generate image. MULAI dengan deskripsi stickman Brand Kit. Bake judul 2 baris BESAR + footer KECIL. User TIDAK edit teks.
 3) motion_prompt = "-"
 4) caption WAJIB ada SOLUSI konkret + ajakan like/share/follow + hashtag.
 5) 1 scene saja.
 
+LOCK KARAKTER: photorealism HANYA untuk background/kota/cahaya. Karakter = stickman wireframe tuxedo + bebek kuning. DILARANG orang real / wajah manusia / kulit fotoreal.
 DILARANG: {$banned}
 DILARANG cover cuma label tema. DILARANG caption tanpa solusi / tanpa CTA engagement.
 DILARANG lupa footer kecil di image_prompt.
@@ -1540,7 +1543,62 @@ TXT;
 
     protected function ensureImagePromptHasText(string $prompt, string $coverTheme, BrandKit $kit, string $format): string
     {
-        return $this->ensureThumbnailHasTitle($prompt, $coverTheme, $kit, $format);
+        $withTitle = $this->ensureThumbnailHasTitle($prompt, $coverTheme, $kit, $format);
+
+        return $this->lockBrandCharacterInPrompt($withTitle, $kit, $format);
+    }
+
+    /**
+     * Paksa karakter Brand Kit (stickman) selalu menang atas "photorealistic" style.
+     */
+    protected function lockBrandCharacterInPrompt(string $prompt, BrandKit $kit, string $format = self::FORMAT_REELS_VO): string
+    {
+        $prompt = trim($prompt);
+        $char = trim((string) ($kit->character_visual ?: ''));
+        if ($char === '') {
+            $char = 'A stickman figure made of thin black wireframe lines, wearing a sharp black executive tuxedo with white shirt and black bowtie, small yellow rubber duck prop, minimal face, no detailed facial features';
+        }
+
+        $isStickman = (bool) preg_match('/stick\s*-?\s*man|wireframe|stick\s*figure/i', $char.' '.$kit->character_name);
+
+        // Hapus cue yang bikin model AI jatuh ke orang real.
+        if ($isStickman) {
+            $prompt = preg_replace(
+                '/\b(photorealistic\s+(human|person|man|woman|people|face|skin)|realistic\s+(human|person|man|woman)|real\s+human|live[\s-]?action\s+person|portrait\s+of\s+a\s+(man|woman|person))\b/iu',
+                'stylized stickman character',
+                $prompt
+            ) ?? $prompt;
+            // "Photorealistic cinematic photo" → environment only
+            $prompt = preg_replace(
+                '/\bPhotorealistic\b/i',
+                'Photorealistic environment only (character remains stickman wireframe)',
+                $prompt
+            ) ?? $prompt;
+        }
+
+        $lock = $isStickman
+            ? 'CHARACTER LOCK (NON-NEGOTIABLE): The ONLY character is the brand stickman — '.$char.'. ABSOLUTELY NO real human, NO photorealistic person, NO detailed human face/skin/hair, NO 3D CGI human. Stick-figure wireframe body only. Photorealism applies ONLY to the city/background/lighting, never to the character.'
+            : 'CHARACTER LOCK (NON-NEGOTIABLE): The ONLY character is "'.$kit->character_name.'" — '.$char.'. Do not replace with a different person or generic model.';
+
+        // Kalau sudah ada lock, refresh; kalau belum, prepend.
+        if (str_contains(Str::lower($prompt), 'character lock')) {
+            $prompt = preg_replace('/CHARACTER LOCK \(NON-NEGOTIABLE\):.*?(?=\.\s+[A-Z"]|\z)/si', '', $prompt) ?? $prompt;
+            $prompt = trim($prompt);
+        }
+
+        if ($prompt === '') {
+            $style = trim((string) ($kit->visual_style ?: 'Cinematic urban night, neon lights, dramatic rim lighting'));
+            $ratio = $format === self::FORMAT_FOTO ? ($kit->aspect_ratio ?: '4:5') : ($kit->aspect_ratio ?: '9:16');
+
+            return $lock.' A vertical '.$ratio.' cinematic social media frame. '.$style.'.';
+        }
+
+        // Pastikan deskripsi karakter brand muncul di depan.
+        if (! str_contains(Str::lower($prompt), 'stickman') && $isStickman) {
+            $prompt = $char.'. '.$prompt;
+        }
+
+        return $lock.' '.$prompt;
     }
 
     /**
@@ -1571,13 +1629,23 @@ TXT;
             if ($coverWasVague || $img === '' || ! $this->promptHasCoverLines($img, $line1, $line2)) {
                 if ($img !== '' && ! $coverWasVague && str_contains($img, '"'.$line1.'"')) {
                     // Prompt visual + judul ada — sisipkan footer kecil / lengkapi teks.
-                    $payload['scenes'][0]['image_prompt'] = rtrim($img, " \t\n\r\0\x0B.").'. '.$textClause.'.';
+                    $payload['scenes'][0]['image_prompt'] = $this->lockBrandCharacterInPrompt(
+                        rtrim($img, " \t\n\r\0\x0B.").'. '.$textClause.'.',
+                        $kit,
+                        $format
+                    );
                 } else {
                     $char = $kit->character_visual ?: 'stickman wireframe executive tuxedo with yellow rubber duck';
-                    $style = $kit->visual_style ?: 'Cinematic high contrast urban night';
+                    $style = $kit->visual_style ?: 'Cinematic high contrast urban night environment (character remains stickman)';
                     $ratio = $format === self::FORMAT_FOTO ? ($kit->aspect_ratio ?: '4:5') : ($kit->aspect_ratio ?: '9:16');
-                    $payload['scenes'][0]['image_prompt'] = "A vertical {$ratio} cinematic social media frame. {$char}. {$style}. {$textClause}. High contrast, readable typography, film grain, no offensive elements.";
+                    $payload['scenes'][0]['image_prompt'] = $this->lockBrandCharacterInPrompt(
+                        "A vertical {$ratio} cinematic social media frame. {$char}. {$style}. {$textClause}. High contrast, readable typography, film grain, no offensive elements.",
+                        $kit,
+                        $format
+                    );
                 }
+            } else {
+                $payload['scenes'][0]['image_prompt'] = $this->lockBrandCharacterInPrompt($img, $kit, $format);
             }
             $payload['thumbnail_prompt'] = $payload['scenes'][0]['image_prompt'];
         }
@@ -1759,20 +1827,28 @@ TXT;
         $titleClause = $this->bakedTextClause($line1, $line2);
 
         if ($prompt !== '' && $this->promptHasCoverLines($prompt, $line1, $line2)) {
-            return $prompt;
+            return $this->lockBrandCharacterInPrompt($prompt, $kit, $format);
         }
 
         // Single-line legacy cover still accepted if exact quote present.
         $legacy = Str::upper(trim(str_replace('|', ' ', $coverTheme)));
         if ($prompt !== '' && $legacy !== '' && str_contains($prompt, '"'.$legacy.'"')) {
-            return rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.';
+            return $this->lockBrandCharacterInPrompt(
+                rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.',
+                $kit,
+                $format
+            );
         }
 
         if ($prompt !== '') {
             // Buang frasa generik tanpa judul, lalu sisipkan judul exact.
             $prompt = preg_replace('/,?\s*(bold\s+)?(moody\s+)?(anton\s+)?title overlay aesthetic\.?/i', '', $prompt) ?? $prompt;
 
-            return rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.';
+            return $this->lockBrandCharacterInPrompt(
+                rtrim($prompt, " \t\n\r\0\x0B.").'. '.$titleClause.'.',
+                $kit,
+                $format
+            );
         }
 
         if ($format === self::FORMAT_REELS_PANJANG) {
