@@ -63,7 +63,8 @@ class BlueprintController extends Controller
 
     public function generate(Request $request, BlueprintGeneratorService $generator): JsonResponse
     {
-        @set_time_limit(300);
+        @set_time_limit(600);
+        @ini_set('memory_limit', '512M');
         $formatList = implode(',', BlueprintGeneratorService::FORMATS);
 
         $data = $request->validate([

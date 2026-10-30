@@ -32,12 +32,17 @@ class BriefStudioService
     {
         $picked = $this->pickSources($user, $filters);
 
+        $radarCards = $picked['radar']->map(fn (TrendSignal $s) => $this->signalCard($s))->values()->all();
+        $angleCard = $picked['angle']
+            ? $this->angleCard($picked['angle'], $picked['angle_indexes'])
+            : null;
+        $analyticsArr = $picked['analytics']?->toAnalysisArray();
+
         return [
-            'radar' => $picked['radar']->map(fn (TrendSignal $s) => $this->signalCard($s))->values()->all(),
-            'angle_finding' => $picked['angle']
-                ? $this->angleCard($picked['angle'], $picked['angle_indexes'])
-                : null,
-            'analytics' => $picked['analytics']?->toAnalysisArray(),
+            'radar' => $radarCards,
+            'angle_finding' => $angleCard,
+            'analytics' => $analyticsArr,
+            'theme_suggestions' => $this->themeSuggestions($radarCards, $angleCard, $analyticsArr, $picked['seed_topic'] ?? ''),
             'available' => [
                 'radar_count' => $this->safeCount(fn () => TrendSignal::query()
                     ->where('niche', config('radar.niche', 'psikologi'))
@@ -50,6 +55,54 @@ class BriefStudioService
             ],
             'warnings' => $picked['warnings'],
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $radar
+     * @param  array<string, mixed>|null  $angle
+     * @param  array<string, mixed>|null  $analytics
+     * @return array<int, array{label:string,source:string,value:string}>
+     */
+    protected function themeSuggestions(array $radar, ?array $angle, ?array $analytics, string $seed): array
+    {
+        $out = [];
+        $seen = [];
+
+        $push = function (string $value, string $source, ?string $label = null) use (&$out, &$seen): void {
+            $value = trim($value);
+            if ($value === '') {
+                return;
+            }
+            $key = Str::lower(preg_replace('/\s+/', ' ', $value) ?? $value);
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'label' => $label ?: Str::limit($value, 72, '…'),
+                'source' => $source,
+                'value' => Str::limit($value, 200, ''),
+            ];
+        };
+
+        foreach (array_slice((array) data_get($analytics, 'title_hooks', []), 0, 8) as $hook) {
+            $push((string) $hook, 'Analisa AI');
+        }
+        foreach ((array) data_get($angle, 'angles', []) as $a) {
+            $push((string) data_get($a, 'title', ''), 'Angle', (string) data_get($a, 'title', ''));
+            $hook = trim((string) data_get($a, 'hook', ''));
+            if ($hook !== '') {
+                $push($hook, 'Angle hook', Str::limit($hook, 64, '…'));
+            }
+        }
+        foreach ($radar as $r) {
+            $push((string) ($r['keyword'] ?: $r['title'] ?? ''), 'Radar');
+        }
+        if ($seed !== '') {
+            $push($seed, 'Seed');
+        }
+
+        return array_slice($out, 0, 16);
     }
 
     protected function safeCount(callable $fn): int

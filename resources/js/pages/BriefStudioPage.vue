@@ -52,6 +52,36 @@ const needsVoice = computed(() => isVo.value || isLong.value);
 const resume = computed(() => brief.value?.resume || {});
 const warnings = computed(() => sources.value?.warnings || brief.value?.inputs_snapshot?.warnings || []);
 const available = computed(() => sources.value?.available || {});
+const selectedTheme = ref('');
+
+const themeSuggestions = computed(() => {
+    const fromApi = sources.value?.theme_suggestions || [];
+    const fromResume = (resume.value?.title_options || []).map((t) => ({
+        label: String(t).slice(0, 72),
+        source: 'Resume',
+        value: String(t),
+    }));
+    const seen = new Set();
+    const out = [];
+    for (const item of [...fromApi, ...fromResume]) {
+        const key = String(item.value || '').toLowerCase().trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+    }
+    return out.slice(0, 20);
+});
+
+function apiError(e, fallback) {
+    if (e?.code === 'ECONNABORTED' || String(e?.message || '').toLowerCase().includes('timeout')) {
+        return 'Timeout generate — coba 10–15 menit dulu, atau jalankan migrate di Hostinger (kolom vo_beat_seconds).';
+    }
+    const data = e?.response?.data;
+    if (data?.errors) {
+        return Object.values(data.errors).flat().join(' ');
+    }
+    return data?.message || fallback;
+}
 
 function syncEditFromBrief(row) {
     const r = row?.resume || {};
@@ -59,11 +89,24 @@ function syncEditFromBrief(row) {
     editHook.value = String(r.hook || '');
     editAngle.value = String(r.angle || '');
     if (r.suggested_format) format.value = r.suggested_format;
-    if (row?.source_topic) topic.value = String(row.source_topic);
+    // Jangan overwrite seed topik otomatis — biar user bisa pilih tema saran.
 }
 
 function applyTitleOption(opt) {
     if (opt) editTitle.value = String(opt);
+}
+
+function pickTheme(item) {
+    const value = String(item?.value || item || '').trim();
+    if (!value) return;
+    selectedTheme.value = value;
+    topic.value = value;
+    editTitle.value = value.slice(0, 120);
+}
+
+async function composeWithTheme(item) {
+    pickTheme(item);
+    await compose();
 }
 
 async function loadSources() {
@@ -74,11 +117,8 @@ async function loadSources() {
             params: topic.value.trim() ? { topic: topic.value.trim() } : {},
         });
         sources.value = data.data;
-        if (sources.value?.angle_finding?.topic && !topic.value) {
-            topic.value = sources.value.angle_finding.topic;
-        }
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal memuat sumber Brief Studio.';
+        error.value = apiError(e, 'Gagal memuat sumber Brief Studio.');
     } finally {
         loading.value = false;
     }
@@ -98,12 +138,15 @@ async function loadHistory() {
 }
 
 async function compose() {
+    if (!topic.value.trim()) {
+        error.value = 'Pilih tema saran atau ketik topik dulu, baru Compose Resume.';
+        return;
+    }
     composing.value = true;
     message.value = '';
     error.value = '';
     try {
-        const payload = {};
-        if (topic.value.trim()) payload.topic = topic.value.trim();
+        const payload = { topic: topic.value.trim() };
         if (sources.value?.radar?.length) {
             payload.trend_signal_ids = sources.value.radar.map((r) => r.id);
         }
@@ -122,7 +165,7 @@ async function compose() {
         message.value = data.message || 'Resume baru disusun. Edit judul/hook di bawah kalau mau, lalu Generate Blueprint.';
         await loadHistory();
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal compose resume.';
+        error.value = apiError(e, 'Gagal compose resume.');
     } finally {
         composing.value = false;
     }
@@ -169,7 +212,7 @@ async function makeBlueprint() {
             router.push({ name: 'blueprint-detail', params: { id: data.data.id } });
         }
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal generate blueprint dari resume.';
+        error.value = apiError(e, 'Gagal generate blueprint dari resume.');
     } finally {
         generating.value = false;
     }
@@ -228,15 +271,36 @@ onMounted(async () => {
 
         <section class="rounded-xl border border-slate-200 bg-white p-5">
             <label class="block text-sm">
-                <span class="mb-1 block text-xs font-semibold text-slate-500">Topik pembahasan (seed untuk Compose Resume)</span>
+                <span class="mb-1 block text-xs font-semibold text-slate-500">Topik pembahasan (wajib dipilih / diketik sebelum Compose)</span>
                 <input
                     v-model="topic"
-                    placeholder="Contoh: toxic parents / overthinking / gaslighting / frame control"
+                    placeholder="Ketik topik ATAU klik tema saran di bawah"
                     class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
             </label>
+            <div class="mt-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Tema saran — klik untuk pilih, dobel-aksi Compose</p>
+                <div v-if="themeSuggestions.length" class="mt-2 flex flex-wrap gap-2">
+                    <button
+                        v-for="(item, i) in themeSuggestions"
+                        :key="i"
+                        type="button"
+                        class="max-w-full rounded-lg border px-3 py-1.5 text-left text-xs transition"
+                        :class="selectedTheme === item.value || topic === item.value
+                            ? 'border-teal-600 bg-teal-700 text-white'
+                            : 'border-slate-200 bg-white text-slate-800 hover:border-teal-300 hover:bg-teal-50'"
+                        :title="item.source + ': ' + item.value"
+                        @click="pickTheme(item)"
+                        @dblclick.prevent="composeWithTheme(item)"
+                    >
+                        <span class="block font-semibold">{{ item.label }}</span>
+                        <span class="block opacity-70">{{ item.source }}</span>
+                    </button>
+                </div>
+                <p v-else class="mt-2 text-xs text-slate-500">Belum ada saran — sync Radar / Angle / Analisa AI dulu, lalu Refresh sumber.</p>
+            </div>
             <p class="mt-2 text-xs text-slate-500">
-                Ini yang menentukan judul resume. Kalau dikosongkan, sistem ambil dari Angle/Analisa terakhir (makanya sering “Mitos Karma…” terus).
+                Resume history kamu sering sama karena seed kosong → selalu ambil Angle/Analisa lama. Pilih tema di sini dulu, baru Compose Resume.
                 Sumber: Radar {{ available.radar_count || 0 }} · Angle {{ available.angle_count || 0 }} · Analisa AI {{ available.analytics_count || 0 }}
             </p>
         </section>

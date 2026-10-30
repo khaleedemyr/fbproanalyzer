@@ -10,6 +10,7 @@ use App\Models\ContentIdea;
 use App\Models\TrendSignal;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class BlueprintGeneratorService
@@ -220,7 +221,7 @@ class BlueprintGeneratorService
             $storyConcept .= "\n\n[Referensi Analisa AI #{$analysis->id}] ".$analysis->title;
         }
 
-        return ContentBlueprint::query()->create([
+        $attrs = [
             'user_id' => $user->id,
             'brand_kit_id' => $kit->id,
             'content_idea_id' => $idea?->id,
@@ -237,7 +238,6 @@ class BlueprintGeneratorService
             'engine' => $this->lastEngine,
             'duration_seconds' => $this->durationSeconds,
             'beat_seconds' => $this->beatSeconds,
-            'vo_beat_seconds' => $format === self::FORMAT_REELS_PANJANG ? $this->voBeatSeconds : $this->beatSeconds,
             'prefer_stock' => $format === self::FORMAT_REELS_PANJANG ? $this->preferStock : false,
             'voice_perspective' => $this->voicePerspective,
             'scenes' => $payload['scenes'],
@@ -246,7 +246,30 @@ class BlueprintGeneratorService
             'title_options' => $payload['title_options'] ?? null,
             'planned_date' => $plannedDate,
             'planned_time' => $plannedDate ? $plannedTime : null,
-        ]);
+        ];
+
+        if (Schema::hasColumn('content_blueprints', 'vo_beat_seconds')) {
+            $attrs['vo_beat_seconds'] = $format === self::FORMAT_REELS_PANJANG
+                ? $this->voBeatSeconds
+                : $this->beatSeconds;
+        } else {
+            $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
+                .'Kolom vo_beat_seconds belum ada di DB — jalankan: php artisan migrate --force');
+        }
+
+        try {
+            return ContentBlueprint::query()->create($attrs);
+        } catch (\Throwable $e) {
+            // Hostinger belum migrate: buang kolom baru lalu coba lagi.
+            if (str_contains($e->getMessage(), 'vo_beat_seconds') && isset($attrs['vo_beat_seconds'])) {
+                unset($attrs['vo_beat_seconds']);
+                $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
+                    .'Simpan tanpa vo_beat_seconds — jalankan migrate di server.');
+
+                return ContentBlueprint::query()->create($attrs);
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -994,7 +1017,8 @@ TXT;
         $visualBeat = max(5, $this->beatSeconds);
         $voBeat = max(3, $this->voBeatSeconds);
         $total = $this->durationSeconds;
-        $count = max(2, intdiv($total, $voBeat));
+        // Template cukup kerangka padat; normalizeLongFormTimeline yang menyesuaikan durasi penuh.
+        $count = min(72, max(24, intdiv($total, max($voBeat, 10))));
 
         $sectionDefs = [
             ['THE GOLDEN HOOK', 0.20, [
@@ -1689,7 +1713,18 @@ TXT;
         $voBeat = max(3, (int) $this->voBeatSeconds);
         $visualBeat = max(5, (int) $this->beatSeconds);
         $total = max($voBeat * 2, (int) $this->durationSeconds);
-        $target = max(2, intdiv($total, $voBeat));
+        $rawTarget = max(2, intdiv($total, $voBeat));
+
+        // Cap scene rows supaya generate 30–60 mnt tidak timeout/OOM di shared hosting.
+        $maxScenes = 180;
+        $merge = $rawTarget > $maxScenes ? (int) ceil($rawTarget / $maxScenes) : 1;
+        $stepBeat = $voBeat * $merge;
+        $target = max(2, intdiv($total, $stepBeat));
+
+        if ($merge > 1) {
+            $this->lastWarning = trim(($this->lastWarning ? $this->lastWarning.' ' : '')
+                ."Durasi panjang: tiap blok naskah ~{$stepBeat}s (gabungan {$merge}× beat {$voBeat}s) agar generate stabil.");
+        }
 
         $source = array_values(array_filter($scenes, fn ($s) => is_array($s)));
         if ($source === []) {
@@ -1699,17 +1734,28 @@ TXT;
         $srcCount = count($source);
         $out = [];
         for ($i = 0; $i < $target; $i++) {
-            if ($srcCount === $target) {
-                $src = $source[$i];
-            } elseif ($srcCount > $target) {
-                $src = $source[(int) floor($i * $srcCount / $target)] ?? $source[$srcCount - 1];
-            } else {
-                // Expand: sebar sumber sepanjang timeline (bukan cycle ketat → VO merata).
-                $src = $source[(int) floor($i * $srcCount / $target)] ?? $source[$srcCount - 1];
+            $srcIdx = (int) floor($i * $srcCount / $target);
+            $srcIdx = min($srcCount - 1, max(0, $srcIdx));
+            $src = $source[$srcIdx];
+
+            // Ambil beberapa sumber di window yang sama supaya VO tidak tipis saat digabung.
+            $vos = [];
+            $ons = [];
+            for ($m = 0; $m < $merge; $m++) {
+                $j = min($srcCount - 1, $srcIdx + $m);
+                $piece = $source[$j];
+                $v = trim((string) ($piece['vo'] ?? ''));
+                if ($v !== '' && ! in_array($v, $vos, true)) {
+                    $vos[] = $v;
+                }
+                $o = trim((string) ($piece['on_screen'] ?? ''));
+                if ($o !== '' && ! in_array($o, $ons, true)) {
+                    $ons[] = $o;
+                }
             }
 
-            $start = $i * $voBeat;
-            $end = $start + $voBeat;
+            $start = $i * $stepBeat;
+            $end = min($total, $start + $stepBeat);
             $type = Str::lower((string) ($src['visual_type'] ?? 'ai'));
             if ($type === '') {
                 $type = 'ai';
@@ -1721,9 +1767,9 @@ TXT;
                 'visual_type' => $type,
                 'image_prompt' => trim((string) ($src['image_prompt'] ?? '')),
                 'motion_prompt' => (string) ($src['motion_prompt'] ?? '-'),
-                'vo' => trim((string) ($src['vo'] ?? '')),
-                'on_screen' => trim((string) ($src['on_screen'] ?? '')),
-                'beat_seconds' => $voBeat,
+                'vo' => $vos !== [] ? implode(' ', $vos) : trim((string) ($src['vo'] ?? '')),
+                'on_screen' => $ons[0] ?? trim((string) ($src['on_screen'] ?? '')),
+                'beat_seconds' => max($voBeat, $end - $start),
                 'visual_plate' => intdiv($start, $visualBeat),
             ];
         }

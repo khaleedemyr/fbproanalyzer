@@ -89,48 +89,63 @@ class BriefStudioController extends Controller
     public function blueprint(Request $request, ContentBrief $contentBrief, BriefStudioService $studio): JsonResponse
     {
         abort_unless($contentBrief->user_id === $request->user()->id, 403);
-        @set_time_limit(300);
+        @set_time_limit(600);
+        @ini_set('memory_limit', '512M');
 
         $formatList = implode(',', BlueprintGeneratorService::FORMATS);
-        $data = $request->validate([
-            'format' => ['nullable', 'in:'.$formatList],
-            'planned_date' => ['nullable', 'date'],
-            'planned_time' => ['nullable', 'date_format:H:i'],
-            'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:3600'],
-            'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:60'],
-            'visual_beat_seconds' => ['nullable', 'integer', 'min:5', 'max:30'],
-            'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
-            'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
-            'prefer_stock' => ['sometimes', 'boolean'],
-            'voice_perspective' => ['nullable', 'string', 'max:40'],
-            'force' => ['sometimes', 'boolean'],
-            'topic' => ['nullable', 'string', 'max:500'],
-            'working_title' => ['nullable', 'string', 'max:200'],
-            'hook' => ['nullable', 'string', 'max:1000'],
-            'angle' => ['nullable', 'string', 'max:2000'],
-        ]);
+        try {
+            $data = $request->validate([
+                'format' => ['nullable', 'in:'.$formatList],
+                'planned_date' => ['nullable', 'date'],
+                'planned_time' => ['nullable', 'date_format:H:i'],
+                'duration_seconds' => ['nullable', 'integer', 'min:5', 'max:3600'],
+                'duration_minutes' => ['nullable', 'integer', 'min:5', 'max:60'],
+                'visual_beat_seconds' => ['nullable', 'integer', 'min:5', 'max:30'],
+                'vo_beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+                'beat_seconds' => ['nullable', 'integer', 'min:3', 'max:30'],
+                'prefer_stock' => ['sometimes', 'boolean'],
+                'voice_perspective' => ['nullable', 'string', 'max:40'],
+                'force' => ['sometimes', 'boolean'],
+                'topic' => ['nullable', 'string', 'max:500'],
+                'working_title' => ['nullable', 'string', 'max:200'],
+                'hook' => ['nullable', 'string', 'max:2000'],
+                'angle' => ['nullable', 'string', 'max:4000'],
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => collect($e->errors())->flatten()->implode(' '),
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
         try {
             $bp = $studio->generateBlueprint($request->user(), $contentBrief, $data);
         } catch (\Throwable $e) {
             report($e);
+            $hint = $e->getMessage();
+            if (str_contains($hint, 'vo_beat_seconds')) {
+                $hint .= ' — jalankan di Hostinger: php artisan migrate --force';
+            }
 
-            return response()->json(['message' => 'Gagal generate blueprint dari resume: '.$e->getMessage()], 500);
+            return response()->json(['message' => 'Gagal generate blueprint dari resume: '.$hint], 500);
         }
 
         $bp->load(['brandKit', 'analyticsAiAnalysis', 'contentBrief']);
+        $generator = app(BlueprintGeneratorService::class);
+        $sceneCount = count($bp->scenes ?? []);
+        // Markdown penuh untuk 100+ scene bikin response timeout di shared hosting.
+        $markdown = $sceneCount > 120
+            ? ''
+            : $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($request->user()));
 
         return response()->json([
             'message' => 'Blueprint dari Brief Studio siap'
                 .($bp->engine === 'gemini' ? ' (AI Gemini).' : ' (template).'),
             'data' => $bp,
             'brief' => $contentBrief->fresh()->toBriefArray(),
-            'markdown' => app(BlueprintGeneratorService::class)->toMarkdown(
-                $bp,
-                $bp->brandKit ?? BrandKit::defaultFor($request->user())
-            ),
+            'markdown' => $markdown,
             'engine' => $bp->engine,
-            'warning' => app(BlueprintGeneratorService::class)->lastWarning(),
+            'warning' => $generator->lastWarning(),
         ], 201);
     }
 
