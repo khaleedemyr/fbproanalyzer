@@ -17,7 +17,7 @@ const format = ref('reels_vo');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
 const textDurationSeconds = ref(8);
-const preferStock = ref(true);
+const preferStock = ref(false);
 const voicePerspective = ref('Aku');
 const analyses = ref([]);
 const analysisId = ref('');
@@ -212,13 +212,13 @@ onMounted(async () => {
                 </label>
                 <label v-if="isLong" class="flex items-center gap-2 text-sm text-slate-700">
                     <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
-                    Utamakan stock video (AI minimal)
+                    Campur stock (default: full ilustrasi buku dari naskah)
                 </label>
             </div>
 
             <p class="mt-2 text-xs text-slate-500">
                 <template v-if="isVo">Stickman jas + bebek · beat 5 dtk · VO / CapCut / Leonardo / motion / thumbnail / caption.</template>
-                <template v-else-if="isLong">Golden Hook → Bab → Penutup · beat 5 dtk · bumper tiap bab · visual mayoritas stock/black.</template>
+                <template v-else-if="isLong">Golden Hook → Bab → Penutup · beat 5 dtk · rangkaian ilustrasi bergaya buku yang nyambung naskah (bukan stickman).</template>
                 <template v-else-if="isText">Image (judul 2 baris + footer kecil “lihat caption” / like-share-follow) → i2v → caption ber-solusi + CTA.</template>
                 <template v-else>1 prompt image (judul 2 baris + footer kecil lihat caption / like-share-follow) + caption ber-solusi + CTA.</template>
             </p>

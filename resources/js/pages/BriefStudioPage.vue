@@ -18,7 +18,7 @@ const voicePerspective = ref('Aku');
 const durationSeconds = ref(15);
 const durationMinutes = ref(10);
 const textDurationSeconds = ref(8);
-const preferStock = ref(true);
+const preferStock = ref(false);
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -302,7 +302,7 @@ onMounted(async () => {
                     </label>
                     <label v-if="isLong" class="flex items-center gap-2 pb-1.5 text-sm text-slate-700">
                         <input v-model="preferStock" type="checkbox" class="rounded border-slate-300" />
-                        Utamakan stock
+                        Campur stock (default: ilustrasi buku)
                     </label>
                     <button
                         type="button"

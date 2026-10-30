@@ -150,6 +150,15 @@ class BlueprintGeneratorService
         }
 
         $payload['scenes'] = $this->ensureSceneTimecodes($payload['scenes'] ?? []);
+
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            $payload['scenes'] = $this->enrichLongFormBookVisuals(
+                $payload['scenes'],
+                (string) $payload['cover_theme'],
+                $cleanTopic
+            );
+        }
+
         $payload['thumbnail_prompt'] = $this->ensureImagePromptHasText(
             (string) ($payload['thumbnail_prompt'] ?? ''),
             (string) $payload['cover_theme'],
@@ -392,12 +401,13 @@ class BlueprintGeneratorService
 
         $lines = [
             $bp->title,
-            '🎬 BLUEPRINT REELS PANJANG / VOD',
+            '🎬 BLUEPRINT REELS PANJANG / VOD (rangkaian ilustrasi bergaya buku)',
             'Tema: "'.$bp->cover_theme.'"',
             'Konsep: '.$bp->story_concept,
             'Durasi total: '.$durLabel.' · beat '.$beat.' dtk · Sudut pandang: "'.$voice.'"',
+            'Style visual AI: textbook watercolor diagram — image_prompt harus nyambung ke naskah VO tiap beat.',
             '',
-            'Durasi | Visual Level-Dewa | Motion Prompt / Keterangan | Naskah VO & Teks Layar',
+            'Durasi | Visual (prompt ilustrasi buku / stock / black) | Motion | Naskah VO & Teks Layar',
             '',
         ];
 
@@ -653,15 +663,32 @@ PROMPT;
         $beatCount = $this->beatCount();
         $minutes = max(1, (int) round($totalSec / 60));
         $preferStock = $this->preferStock
-            ? 'UTAMAKAN stock + black (minimal AI). Target: ~70% stock, ~15% black, ~10% bumper, max ~5% ai.'
-            : 'Boleh campur ai/stock/black/bumper seimbang.';
+            ? 'Campur: ~40% AI ilustrasi buku + ~40% stock + ~10% black + bumper antar bab.'
+            : 'UTAMAKAN AI ilustrasi buku (visual_type "ai") sebagai rangkaian plate seperti buku penjelasan. Sisipkan black jarang + bumper antar bab. Stock hanya jika benar-benar perlu (~10%).';
         $banned = $this->bannedHookPhrasesForPrompt();
+        $bookStyle = $this->bookIllustrationStyleGuide();
 
         return <<<PROMPT
-Kamu adalah penulis MASTER BLUEPRINT VOD Dark Psychology yang dirancang untuk SANGAT VIRAL untuk brand "{$kit->name}".
+Kamu adalah penulis MASTER BLUEPRINT VOD psikologi untuk brand "{$kit->name}".
 Durasi {$totalSec}s (~{$minutes} mnt), beat {$beat}s, ~{$beatCount} scene.
 {$preferStock}
-Stock: "(Video Stok 10 Detik): ...". Black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut". Bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB bumper akhir tiap bab.
+
+===== VISUAL VIDEO PANJANG = RANGKAIAN ILUSTRASI BUKU =====
+Setiap scene AI harus seperti HLMN BUKU / textbook psychology diagram (bukan stickman tuxedo, bukan cinematic person, bukan stock abstrak kosong).
+Style wajib di image_prompt:
+{$bookStyle}
+
+ATURAN image_prompt scene AI:
+- WAJIB merepresentasikan ISI NASKAH VO scene itu (metafora visual dari kalimat VO).
+- 1 konsep jelas per plate: otak, filter sinyal, panah, ikon emosi, diagram proses, dll sesuai VO.
+- Boleh label tulisan tangan kecil di gambar (Bahasa Indonesia) yang relevan.
+- DILARANG stickman executive + bebek kuning (itu hanya untuk Reels pendek).
+- DILARANG photorealistic human portrait.
+- DILARANG image_prompt generik yang tidak nyambung VO.
+- motion_prompt: slow Ken Burns / gentle push-in on the illustration plate, keep diagram readable.
+
+Black: "(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut". Bumper: "Bumper KEA Abbasy" + SFX, VO kosong. WAJIB bumper akhir tiap bab.
+Stock (jika dipakai): deskripsi stock yang masih relevan topik, awali "(Video Stok 10 Detik): ...".
 
 Tema: {$title}
 Topik: {$topic}
@@ -673,9 +700,9 @@ Hashtag: {$kit->caption_hashtags}
 Setiap scene timecode "MM:SS - MM:SS" sesuai beat {$beat}s.
 
 ===== GOLDEN HOOK WAJIB BERBASIS REALITA =====
-- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik (Elon, Jobs, Churchill, Seneca, CEO, dll) relevan topik.
+- 60–120 detik pertama: CERITA NYATA tokoh dunia / kasus publik relevan topik.
 - Format: tahun + situasi + konflik + twist → cliff ke topik.
-- 3 beat pertama WAJIB punya vo terisi (bukan bumper).
+- 3 beat pertama WAJIB punya vo terisi (bukan bumper) + image_prompt ilustrasi buku yang mendukung cerita/konsep.
 
 DILARANG KERAS pembuka:
 {$banned}
@@ -683,14 +710,13 @@ DILARANG KERAS pembuka:
 ===== NASKAH =====
 - Hanya scene visual_type "bumper" yang boleh vo kosong.
 - Semua scene stock/ai/black WAJIB punya vo + on_screen dari sudut "{$this->voicePerspective}".
-- Hook naskah + visual = aset utama.
-- Field "caption" WAJIB terisi (hook + ringkas isi + CTA + hashtag). JANGAN kosong.
+- Field "caption" WAJIB terisi (hook + ringkas isi + CTA + hashtag).
 
-ATURAN: no metrik radar. Thumbnail WAJIB teks judul di quotes.
+ATURAN: no metrik radar. Thumbnail boleh cinematic clickbait + teks judul di quotes (thumbnail boleh beda dari style buku).
 Struktur: GOLDEN HOOK → BAB1 → BAB2 → BAB3 → PENUTUP (+ bumper antar bab saja).
 JSON SAJA dengan keys: title, cover_theme, story_concept, scenes, thumbnail_prompt, caption, title_options.
+Setiap scene HARUS: timecode, visual_type, vo, on_screen, image_prompt, motion_prompt, section.
 PROMPT;
-    }
 
     protected function bannedHookPhrasesForPrompt(): string
     {
@@ -958,21 +984,11 @@ TXT;
         ];
 
         $stocks = [
-            '(Video Stok 10 Detik): Micro expression of a person looking aggressive in shadows.',
-            '(Video Stok 10 Detik): Close up male eye staring coldly without blinking.',
-            '(Video Stok 10 Detik): Office worker looking stressed under dramatic lighting.',
-            '(Video Stok 10 Detik): Person holding head in hands panicking.',
-            '(Video Stok 10 Detik): Dark ink forming abstract shapes in clear water.',
-            '(Video Stok 10 Detik): Chess pieces falling on a dark board.',
-            '(Video Stok 10 Detik): Man in suit looking nervous in shadows.',
-            '(Video Stok 10 Detik): Calm confident man standing still in low light.',
-            '(Video Stok 10 Detik): Hourglass and ticking clock macro.',
-            '(Video Stok 10 Detik): Shadow reversing direction abstract slow motion.',
-        ];
-        $aiSparse = [
-            'Cinematic abstract. A glowing steel trap snapping shut in slow motion.',
-            'Cinematic surrealism. A glass frame shattering into golden shards.',
-            'Abstract geometry. A glowing golden lock snapping shut on a black box.',
+            '(Video Stok 10 Detik): Slow pan across open psychology textbook diagrams on a desk.',
+            '(Video Stok 10 Detik): Hands flipping educational illustrated notebook pages.',
+            '(Video Stok 10 Detik): Macro of ink sketching arrows on paper.',
+            '(Video Stok 10 Detik): Soft focus library shelves with warm light.',
+            '(Video Stok 10 Detik): Close-up of handwritten notes and mind-map doodles.',
         ];
 
         $vosPool = [];
@@ -999,7 +1015,6 @@ TXT;
         $t = 0;
         $voIdx = 0;
         $stockIdx = 0;
-        $aiIdx = 0;
 
         foreach ($sectionDefs as $sIdx => $def) {
             $name = $def[0];
@@ -1011,37 +1026,23 @@ TXT;
                 $end = $t + $beat;
                 $mod = $i % 5;
 
-                if ($this->preferStock) {
-                    if ($mod === 2) {
-                        $type = 'black';
-                        $visual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
-                        $motion = '-';
-                    } elseif ($sIdx === 0 && $i === 0) {
-                        $type = 'ai';
-                        $visual = $aiSparse[$aiIdx++ % count($aiSparse)];
-                        $motion = 'Extremely slow zoom in. Subtle atmospheric motion.';
-                    } else {
-                        $type = 'stock';
-                        $visual = $stocks[$stockIdx++ % count($stocks)];
-                        $motion = '-';
-                    }
-                } elseif ($mod === 0) {
-                    $type = 'ai';
-                    $visual = $aiSparse[$aiIdx++ % count($aiSparse)];
-                    $motion = 'Extremely slow zoom in. Subtle atmospheric motion.';
-                } elseif ($mod === 2) {
+                $vo = $vosPool[$voIdx % count($vosPool)];
+                $voIdx++;
+                $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $cover, 34, ''));
+
+                if ($this->preferStock && $mod === 1) {
+                    $type = 'stock';
+                    $visual = $stocks[$stockIdx++ % count($stocks)];
+                    $motion = '-';
+                } elseif ($mod === 4) {
                     $type = 'black';
                     $visual = '(Layar Hitam 10 Detik): Warna Solid Hitam dari CapCut.';
                     $motion = '-';
                 } else {
-                    $type = 'stock';
-                    $visual = $stocks[$stockIdx++ % count($stocks)];
-                    $motion = '-';
+                    $type = 'ai';
+                    $visual = $this->bookIllustrationPrompt($vo, $shortTopic, $on);
+                    $motion = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable, subtle paper texture motion.';
                 }
-
-                $vo = $vosPool[$voIdx % count($vosPool)];
-                $voIdx++;
-                $on = Str::upper(Str::limit(preg_replace('/[^\pL\pN\s]+/u', '', $vo) ?: $cover, 34, ''));
 
                 $scenes[] = [
                     'section' => $name.' ('.$this->formatTimecode($sectionStart, $sectionStart + ($n * $beat)).')',
@@ -1093,7 +1094,7 @@ TXT;
         return [
             'title' => 'Episode: '.Str::limit($theme, 100, ''),
             'cover_theme' => $cover,
-            'story_concept' => "Master blueprint {$minutes} mnt (beat {$beat}s, ".($this->preferStock ? 'utamakan stock' : 'campur visual').") tentang {$shortTopic}: Hook → Bab → Penutup + bumper.",
+            'story_concept' => "Master blueprint {$minutes} mnt (beat {$beat}s) tentang {$shortTopic}: rangkaian ilustrasi bergaya buku yang mengikuti naskah. Hook → Bab → Penutup + bumper.",
             'scenes' => $scenes,
             'thumbnail_prompt' => "A vertical 9:16 cinematic dark psychology thumbnail. Moody high-contrast scene. At the top of the image, the text \"{$cover}\" is boldly displayed in a large, modern, glowing yellow font with a dark drop shadow. Professional film grain, no offensive elements.",
             'caption' => $caption,
@@ -1545,14 +1546,97 @@ TXT;
     {
         $withTitle = $this->ensureThumbnailHasTitle($prompt, $coverTheme, $kit, $format);
 
+        // Video panjang = ilustrasi buku (bukan stickman lock).
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            return $withTitle;
+        }
+
         return $this->lockBrandCharacterInPrompt($withTitle, $kit, $format);
+    }
+
+    protected function bookIllustrationStyleGuide(): string
+    {
+        return 'Educational hand-drawn textbook / popular-science book plate: fine black ink outlines, soft muted watercolor washes (tan, light blue, pale yellow), clean white paper background, conceptual psychology/science infographic with arrows, icons, and labeled metaphors. Consistent series look across frames like consecutive book pages.';
+    }
+
+    protected function bookIllustrationPrompt(string $vo, string $topic, string $onScreen = ''): string
+    {
+        $concept = trim($vo !== '' ? $vo : $topic);
+        $concept = Str::limit(preg_replace('/\s+/', ' ', $concept) ?? $concept, 200, '');
+        $label = trim($onScreen);
+        $labelClause = $label !== ''
+            ? ' Small neat handwritten Indonesian label: "'.Str::limit($label, 48, '').'".'
+            : '';
+
+        return $this->bookIllustrationStyleGuide()
+            .' Visual metaphor that clearly illustrates this narration beat: '.$concept.'.'
+            .$labelClause
+            .' No photorealistic humans, no stickman tuxedo character, no cinematic live-action still, no 3D CGI person. Keep diagram readable. --ar 9:16';
+    }
+
+    /**
+     * Pastikan scene AI panjang punya image_prompt yang nyambung ke VO (style buku).
+     *
+     * @param  array<int, array<string, mixed>>  $scenes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function enrichLongFormBookVisuals(array $scenes, string $coverTheme, string $topic): array
+    {
+        foreach ($scenes as &$scene) {
+            $type = Str::lower((string) ($scene['visual_type'] ?? 'ai'));
+            if (in_array($type, ['bumper', 'black', 'stock'], true)) {
+                continue;
+            }
+
+            $vo = trim((string) ($scene['vo'] ?? ''));
+            $on = trim((string) ($scene['on_screen'] ?? ''));
+            $img = trim((string) ($scene['image_prompt'] ?? ''));
+            $looksBook = (bool) preg_match('/textbook|watercolor|hand-drawn|illustration plate|infographic|wireframe brain|book plate|sketched/i', $img);
+            $mentionsStickman = (bool) preg_match('/stick\s*-?\s*man|tuxedo|rubber duck/i', $img);
+            $genericStockish = str_starts_with($img, '(Video Stok') || str_starts_with($img, '(Layar Hitam');
+
+            if ($img === '' || $mentionsStickman || $genericStockish || ! $looksBook || ($vo !== '' && ! $this->promptRelatesToVo($img, $vo))) {
+                $scene['visual_type'] = 'ai';
+                $scene['image_prompt'] = $this->bookIllustrationPrompt($vo !== '' ? $vo : $coverTheme, $topic, $on);
+                if (trim((string) ($scene['motion_prompt'] ?? '')) === '' || $scene['motion_prompt'] === '-') {
+                    $scene['motion_prompt'] = 'Slow Ken Burns push-in on the illustration plate, keep labels sharp and readable.';
+                }
+            }
+        }
+        unset($scene);
+
+        return $scenes;
+    }
+
+    protected function promptRelatesToVo(string $prompt, string $vo): bool
+    {
+        $words = preg_split('/\s+/u', Str::lower(preg_replace('/[^\pL\pN\s]+/u', ' ', $vo) ?? $vo)) ?: [];
+        $words = array_values(array_filter($words, fn ($w) => mb_strlen($w) >= 5));
+        if ($words === []) {
+            return true;
+        }
+        $hay = Str::lower($prompt);
+        $hits = 0;
+        foreach (array_slice($words, 0, 8) as $w) {
+            if (str_contains($hay, $w)) {
+                $hits++;
+            }
+        }
+
+        // Relaks: cukup 1 kata kunci, atau prompt sudah style buku (dicek pemanggil).
+        return $hits >= 1;
     }
 
     /**
      * Paksa karakter Brand Kit (stickman) selalu menang atas "photorealistic" style.
+     * Hanya untuk Reels pendek / foto / text — bukan video panjang.
      */
     protected function lockBrandCharacterInPrompt(string $prompt, BrandKit $kit, string $format = self::FORMAT_REELS_VO): string
     {
+        if ($format === self::FORMAT_REELS_PANJANG) {
+            return trim($prompt);
+        }
+
         $prompt = trim($prompt);
         $char = trim((string) ($kit->character_visual ?: ''));
         if ($char === '') {
