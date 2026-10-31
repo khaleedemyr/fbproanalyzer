@@ -78,6 +78,44 @@ const groupedScenes = computed(() => {
     return groups;
 });
 
+/** Section yang di-collapse (key = nama bab). Default: video panjang → hanya bab pertama terbuka. */
+const collapsedSections = ref({});
+const sectionCollapseReady = ref(false);
+
+function initSectionCollapse() {
+    if (sectionCollapseReady.value || groupedScenes.value.length === 0) return;
+    const map = {};
+    groupedScenes.value.forEach((g, i) => {
+        // Panjang: buka bab pertama saja. Pendek: semua terbuka.
+        map[g.name] = isLong.value ? i > 0 : false;
+    });
+    collapsedSections.value = map;
+    sectionCollapseReady.value = true;
+}
+
+function isSectionCollapsed(name) {
+    return !!collapsedSections.value[name];
+}
+
+function toggleSection(name) {
+    collapsedSections.value = {
+        ...collapsedSections.value,
+        [name]: !collapsedSections.value[name],
+    };
+}
+
+function expandAllSections() {
+    const map = {};
+    groupedScenes.value.forEach((g) => { map[g.name] = false; });
+    collapsedSections.value = map;
+}
+
+function collapseAllSections() {
+    const map = {};
+    groupedScenes.value.forEach((g) => { map[g.name] = true; });
+    collapsedSections.value = map;
+}
+
 function stopPoll() {
     if (pollTimer) {
         clearInterval(pollTimer);
@@ -193,6 +231,8 @@ function ensureProgressPoll() {
                 if (data.data.status === 'ready' || data.data.status === 'scheduled') {
                     message.value = 'Blueprint panjang siap.';
                     error.value = '';
+                    sectionCollapseReady.value = false;
+                    initSectionCollapse();
                 } else if (data.data.status === 'failed') {
                     error.value = data.data.story_concept || 'Generate gagal.';
                 }
@@ -239,6 +279,8 @@ async function load() {
         if (data.progress) progress.value = data.progress;
         plannedDate.value = data.data.planned_date ? String(data.data.planned_date).slice(0, 10) : '';
         plannedTime.value = data.data.planned_time ? String(data.data.planned_time).slice(0, 5) : '09:00';
+        sectionCollapseReady.value = false;
+        initSectionCollapse();
         if (data.data.status === 'generating') {
             startPoll();
         }
@@ -590,59 +632,98 @@ onUnmounted(stopPoll);
 
             <!-- Mode VO / Panjang -->
             <template v-else>
-                <div v-for="group in groupedScenes" :key="group.name" class="space-y-3">
-                    <div class="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 pb-2">
-                        <h3 class="text-base font-semibold text-slate-900">{{ group.name }}</h3>
-                        <p v-if="isLong && group.name !== 'BUMPER'" class="text-[11px] text-slate-500">
-                            Target naskah ~{{ Math.round((Number(voBeatSeconds) || 5) * 2.3) }} kata / beat {{ voBeatSeconds }}s
-                        </p>
-                    </div>
-                    <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h4 class="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
-                                <span
-                                    class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-teal-700 px-2 text-xs font-bold text-white"
-                                    :title="'Card ' + scene._no"
-                                >{{ scene._no }}</span>
-                                <span>
-                                    {{ scene.timecode || '—' }}
-                                    <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
-                                </span>
-                            </h4>
+                <div v-if="groupedScenes.length > 1" class="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        @click="expandAllSections"
+                    >
+                        Expand semua bab
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        @click="collapseAllSections"
+                    >
+                        Collapse semua bab
+                    </button>
+                </div>
+
+                <div v-for="group in groupedScenes" :key="group.name" class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                    <button
+                        type="button"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-slate-50"
+                        :aria-expanded="!isSectionCollapsed(group.name)"
+                        @click="toggleSection(group.name)"
+                    >
+                        <span class="flex items-center gap-2">
                             <span
-                                v-if="scene.visual_type"
-                                class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600"
-                            >
-                                {{ scene.visual_type }}
+                                class="inline-flex h-6 w-6 items-center justify-center rounded bg-slate-100 text-xs font-bold text-slate-700 transition-transform"
+                                :class="isSectionCollapsed(group.name) ? '' : 'rotate-90'"
+                            >›</span>
+                            <span class="text-base font-semibold text-slate-900">{{ group.name }}</span>
+                            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                {{ group.scenes.length }} card
                             </span>
-                        </div>
-                        <div class="mt-4 grid gap-4 lg:grid-cols-2">
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                    Naskah VO · sudut {{ bp.voice_perspective || 'Aku' }}
-                                </p>
-                                <p class="mt-1 text-sm text-slate-800">{{ scene.vo ? `"${scene.vo}"` : '(Kosong / bumper)' }}</p>
-                                <button v-if="scene.vo" class="mt-2 text-xs text-teal-700" @click="copyText(scene.vo)">Copy VO</button>
+                        </span>
+                        <span class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span v-if="isLong && group.name !== 'BUMPER'">
+                                Target naskah ~{{ Math.round((Number(voBeatSeconds) || 5) * 2.3) }} kata / beat {{ voBeatSeconds }}s
+                            </span>
+                            <span class="font-semibold text-teal-800">
+                                {{ isSectionCollapsed(group.name) ? 'Expand' : 'Collapse' }}
+                            </span>
+                        </span>
+                    </button>
+
+                    <div v-show="!isSectionCollapsed(group.name)" class="space-y-3 border-t border-slate-100 px-4 py-4">
+                        <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-slate-50/60 p-5">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <h4 class="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
+                                    <span
+                                        class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-teal-700 px-2 text-xs font-bold text-white"
+                                        :title="'Card ' + scene._no"
+                                    >{{ scene._no }}</span>
+                                    <span>
+                                        {{ scene.timecode || '—' }}
+                                        <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
+                                    </span>
+                                </h4>
+                                <span
+                                    v-if="scene.visual_type"
+                                    class="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600"
+                                >
+                                    {{ scene.visual_type }}
+                                </span>
                             </div>
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Teks On-Screen</p>
-                                <pre class="mt-1 whitespace-pre-wrap text-sm text-slate-800">{{ scene.on_screen }}</pre>
-                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.on_screen)">Copy teks</button>
+                            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+                                <div>
+                                    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                        Naskah VO · sudut {{ bp.voice_perspective || 'Aku' }}
+                                    </p>
+                                    <p class="mt-1 text-sm text-slate-800">{{ scene.vo ? `"${scene.vo}"` : '(Kosong / bumper)' }}</p>
+                                    <button v-if="scene.vo" class="mt-2 text-xs text-teal-700" @click="copyText(scene.vo)">Copy VO</button>
+                                </div>
+                                <div>
+                                    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Teks On-Screen</p>
+                                    <pre class="mt-1 whitespace-pre-wrap text-sm text-slate-800">{{ scene.on_screen }}</pre>
+                                    <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.on_screen)">Copy teks</button>
+                                </div>
+                                <div>
+                                    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                        {{ isLong ? 'Visual Level-Dewa' : '🎨 Prompt Gambar' }}
+                                    </p>
+                                    <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.image_prompt }}</p>
+                                    <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.image_prompt)">Copy visual</button>
+                                </div>
+                                <div>
+                                    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">🎬 Motion / Keterangan</p>
+                                    <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.motion_prompt }}</p>
+                                    <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.motion_prompt)">Copy motion</button>
+                                </div>
                             </div>
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                    {{ isLong ? 'Visual Level-Dewa' : '🎨 Prompt Gambar' }}
-                                </p>
-                                <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.image_prompt }}</p>
-                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.image_prompt)">Copy visual</button>
-                            </div>
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">🎬 Motion / Keterangan</p>
-                                <p class="mt-1 text-xs leading-relaxed text-slate-700">{{ scene.motion_prompt }}</p>
-                                <button class="mt-2 text-xs text-teal-700" @click="copyText(scene.motion_prompt)">Copy motion</button>
-                            </div>
-                        </div>
-                    </section>
+                        </section>
+                    </div>
                 </div>
 
                 <section class="rounded-xl border border-slate-200 bg-white p-5">
