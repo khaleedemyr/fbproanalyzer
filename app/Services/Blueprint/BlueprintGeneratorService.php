@@ -1099,15 +1099,19 @@ Hashtag: {$kit->caption_hashtags}
 {$radarBlock}
 Struktur: HOOK → BAB1 → bumper(10s) → BAB2 → bumper(10s) → BAB3 → PENUTUP.
 Bumper visual_type "bumper", vo "", durasi 10 detik.
-Hook = cerita nyata tokoh/kasus (tahun + twist).
+
+===== ISI NASKAH PER BAGIAN (WAJIB) =====
+- GOLDEN HOOK: kejadian NYATA tokoh/kasus terkenal di dunia (tahun + nama + twist). Bukan tip abstrak.
+- BAB 1 / BAB 2 / BAB 3: bedah pola + WAJIB sisipkan kutipan filsuf ATAU referensi buku klasik (contoh: Nietzsche, Epictetus, Machiavelli, Carl Jung, Erich Fromm, Robert Greene, "Meditations", "The Prince", dll) yang relevan topik — lalu hubungkan ke kasus di hook. Jangan hanya tips generik.
+- PENUTUP: takeaway + sampai jumpa + subscribe/like/comment/share.
 
 ===== FRAMEWORK FLSR (WAJIB) =====
 Finding → Listing → Sorting → Recreating:
-- HOOK = Finding (buka dengan pola/kasus yang terbukti menggugah).
-- BAB 1 = Listing elemen pola (apa yang terjadi, detail konkret).
-- BAB 2 = Sorting (bedah mana yang paling berbahaya / paling relevan audiens).
-- BAB 3 = Recreating (adaptasi ke hidup penonton + insight unik brand).
-- PENUTUP = takeaway + WAJIB ucapan sampai jumpa + ajakan subscribe, like, comment, share.
+- HOOK = Finding (kasus nyata yang terbukti menggugah).
+- BAB 1 = Listing elemen pola + 1 kutipan/referensi buku.
+- BAB 2 = Sorting sudut terbahaya + kutipan/filsuf berbeda dari Bab 1.
+- BAB 3 = Recreating ke hidup penonton + insight brand (boleh 1 referensi lagi).
+- PENUTUP = CTA engage.
 story_concept wajib diawali ringkas "FLSR: ...".
 
 DILARANG pembuka:
@@ -1224,7 +1228,10 @@ PROMPT;
 Finding → Listing → Sorting → Recreating.
 Finding: pola konten terbukti. Listing: elemen menang. Sorting: pilih sudut terkuat. Recreating: naskah ORI brand.
 Cantumkan di story_concept: "FLSR: ...".
-Untuk video panjang, PENUTUP wajib: sampai jumpa + subscribe, like, comment, share.
+Untuk video panjang:
+- GOLDEN HOOK = kejadian nyata tokoh/kasus terkenal (tahun + nama + twist).
+- BAB 1–3 = bedah pola + kutipan filsuf / referensi buku klasik, dihubungkan ke kasus hook.
+- PENUTUP wajib: sampai jumpa + subscribe, like, comment, share.
 
 ===== GAYA BAHASA (WAJIB) =====
 - Bahasa Indonesia lisan natural, seperti ngomong ke kamera — bukan esai kaku.
@@ -2797,6 +2804,19 @@ TXT;
             $seed = [$this->sectionSeedLine($section, $topic, $coverTheme)];
         }
 
+        // Bab isi: pastikan ada benih kutipan filsuf/buku kalau seed belum punya.
+        $secNorm = Str::upper($this->normalizeLongFormSection($section));
+        if (str_contains($secNorm, 'BAB')) {
+            $joinedSeed = Str::lower(implode(' ', $seed));
+            $hasQuote = (bool) preg_match(
+                '/nietzsche|epictetus|machiavelli|jung|fromm|greene|aurelius|seneca|kutip|menurut|dalam buku|meditations|the prince|48 laws/iu',
+                $joinedSeed
+            );
+            if (! $hasQuote) {
+                array_unshift($seed, $this->philosophyChapterSeedLine($secNorm, $topic, $coverTheme));
+            }
+        }
+
         $out = [];
         $usedFp = [];
         foreach ($seed as $line) {
@@ -2905,12 +2925,15 @@ TXT;
             ? '(belum ada — mulai dari benih)'
             : collect($context)->values()->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
         $seedTxt = collect($seed)->take(6)->map(fn ($l, $i) => ($i + 1).'. '.$l)->implode("\n");
+        $sectionRule = $this->longFormSectionNarrationRule($section);
 
         $prompt = <<<PROMPT
 Kamu ghostwriter naskah VO Reels (Bahasa Indonesia), sudut "{$vp}".
 Topik: {$topic}
 Cover/tema: {$coverTheme}
 Bagian: {$section}
+
+{$sectionRule}
 
 BENIH CERITA (wajib diikuti — tokoh/peristiwa/pola di sini):
 {$seedTxt}
@@ -3643,13 +3666,55 @@ PROMPT;
         $short = Str::limit($topic, 50, '');
 
         if (str_contains($sec, 'HOOK')) {
-            return "Ada cerita nyata yang membuka pola gelap di balik {$short}, dan {$vp} perlu mendengarnya sampai selesai.";
+            return "Ada kasus nyata yang terkenal soal {$short} — nama, tahun, dan twistnya harus kebaca dari detik pertama.";
         }
         if (str_contains($sec, 'PENUTUP')) {
             return $this->closingCtaLine($short);
         }
 
-        return "Dari sini {$vp} bedah bagaimana {$short} bekerja diam-diam dalam percakapan sehari-hari.";
+        return $this->philosophyChapterSeedLine($sec, $short, $coverTheme);
+    }
+
+    /**
+     * Aturan naskah per section untuk expand Gemini (video panjang).
+     */
+    protected function longFormSectionNarrationRule(string $section): string
+    {
+        $sec = Str::upper($this->normalizeLongFormSection($section));
+
+        if (str_contains($sec, 'HOOK')) {
+            return 'ATURAN BAGIAN INI: GOLDEN HOOK — WAJIB kejadian nyata tokoh/kasus terkenal di dunia (nama + tahun + twist). Jangan mulai dari tips atau kutipan buku dulu.';
+        }
+        if (str_contains($sec, 'PENUTUP')) {
+            return 'ATURAN BAGIAN INI: PENUTUP — takeaway singkat, lalu sampai jumpa + ajakan subscribe, like, comment, share.';
+        }
+        if (str_contains($sec, 'BAB')) {
+            return 'ATURAN BAGIAN INI: BAB — bedah pola dari kasus di hook, dan WAJIB sisipkan minimal satu kutipan filsuf ATAU referensi buku klasik yang relevan, lalu hubungkan ke kasus nyata tadi. Kutipan boleh diparafrase natural (bukan ceramah akademik).';
+        }
+
+        return 'ATURAN BAGIAN INI: lanjutkan cerita natural; kalau ini bab isi, sisipkan referensi filsuf/buku bila belum ada.';
+    }
+
+    /**
+     * Benih bab: kutipan/filsuf + tautan ke topik (fallback PHP).
+     */
+    protected function philosophyChapterSeedLine(string $sectionKey, string $topic, string $coverTheme): string
+    {
+        $vp = $this->voicePerspective;
+        $bank = [
+            ['who' => 'Nietzsche', 'line' => 'siapa yang bertarung dengan monster harus hati-hati agar tidak jadi monster juga'],
+            ['who' => 'Epictetus', 'line' => 'bukan peristiwa yang mengganggu kita, melainkan penilaian kita atas peristiwa itu'],
+            ['who' => 'Machiavelli', 'line' => 'orang lebih mudah ditipu oleh apa yang mereka ingin percaya'],
+            ['who' => 'Carl Jung', 'line' => 'sampai kau membuat alam bawah sadar sadar, ia akan mengarahkan hidupmu dan kau akan menyebutnya takdir'],
+            ['who' => 'Erich Fromm', 'line' => 'cinta yang tidak membebaskan adalah kepemilikan yang menyamar'],
+            ['who' => 'Robert Greene', 'line' => 'dalam permainan kekuasaan, yang terlihat lemah sering sedang menguji siapa yang paling mudah dikendalikan'],
+            ['who' => 'Marcus Aurelius', 'line' => 'kau punya kuasa atas pikiranmu — bukan peristiwa di luar'],
+            ['who' => 'Seneca', 'line' => 'kita menderita lebih banyak dalam imajinasi daripada kenyataan — kecuali saat manipulasi membuat imajinasi itu jadi alat kontrol'],
+        ];
+        $salt = abs(crc32($sectionKey.'|'.$topic.'|'.$coverTheme));
+        $pick = $bank[$salt % count($bank)];
+
+        return "Di sini {$vp} tarik benang dari {$pick['who']}: \"{$pick['line']}\" — dan lihat bagaimana itu menjelma di pola {$topic}.";
     }
 
     protected function ensureFlsrStoryConcept(string $concept, string $topic = ''): string
