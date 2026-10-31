@@ -65,13 +65,15 @@ function sceneDurationLabel(scene) {
 const groupedScenes = computed(() => {
     const groups = [];
     let current = null;
+    let n = 0;
     for (const scene of scenes.value) {
+        n += 1;
         const section = scene.section || (isLong.value ? 'Blueprint' : isVisual.value ? formatLabel.value : 'REELS VO');
         if (!current || current.name !== section) {
             current = { name: section, scenes: [] };
             groups.push(current);
         }
-        current.scenes.push(scene);
+        current.scenes.push({ ...scene, _no: n });
     }
     return groups;
 });
@@ -597,9 +599,15 @@ onUnmounted(stopPoll);
                     </div>
                     <section v-for="(scene, idx) in group.scenes" :key="group.name + idx" class="rounded-xl border border-slate-200 bg-white p-5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <h4 class="font-semibold text-slate-900">
-                                {{ scene.timecode || '—' }}
-                                <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
+                            <h4 class="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
+                                <span
+                                    class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-teal-700 px-2 text-xs font-bold text-white"
+                                    :title="'Card ' + scene._no"
+                                >{{ scene._no }}</span>
+                                <span>
+                                    {{ scene.timecode || '—' }}
+                                    <span class="ml-2 text-xs font-normal text-slate-500">({{ sceneDurationLabel(scene) }})</span>
+                                </span>
                             </h4>
                             <span
                                 v-if="scene.visual_type"
