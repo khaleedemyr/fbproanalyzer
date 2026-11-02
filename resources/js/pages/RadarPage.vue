@@ -50,14 +50,21 @@ async function refreshNicheRank() {
     rankingNiches.value = true;
     message.value = '';
     error.value = '';
+    warnings.value = [];
     try {
-        const { data: res } = await http.post('/niches/refresh-rank', { region: region.value });
+        // ~20 niche × YouTube + Google Trends — bisa 1–2 menit
+        const { data: res } = await http.post(
+            '/niches/refresh-rank',
+            { region: region.value },
+            { timeout: 180000 },
+        );
         niches.value = res.data || [];
         nicheTop.value = res.top || (res.data || []).slice(0, 5);
         nicheRankedAt.value = res.ranked_at || null;
-        message.value = 'Ranking niche untuk akun baru diperbarui (cache 24 jam).';
+        warnings.value = res.warnings || [];
+        message.value = 'Ranking niche berbasis data (Google Trends + YouTube). Cache 12 jam.';
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal refresh ranking niche.';
+        error.value = e.response?.data?.message || 'Gagal hitung ranking niche dari data.';
     } finally {
         rankingNiches.value = false;
     }
@@ -207,8 +214,8 @@ onMounted(load);
                 <div>
                     <h3 class="text-base font-semibold text-slate-900">Niche untuk akun baru · {{ region }}</h3>
                     <p class="mt-0.5 max-w-2xl text-xs text-slate-500">
-                        Bukan topik yang sudah kamu isi. Ini kandidat niche pasar (psikologi, komedi, kuliner, …)
-                        — bantu pilih fokus akun baru. Klik “Cek niche…” untuk ranking AI.
+                        Ranking berbasis data: Google Trends (minat keyword) + YouTube (avg views 14 hari) + hit Daily Trends.
+                        Bukan opini AI. Skor = YT 45% · Trends 40% · Daily 15%.
                         <span v-if="nicheRankedAt"> · update {{ nicheRankedAt }}</span>
                     </p>
                 </div>
@@ -218,7 +225,7 @@ onMounted(load);
                     :disabled="rankingNiches || nichesLoading"
                     @click="refreshNicheRank"
                 >
-                    {{ rankingNiches ? 'Menganalisa…' : 'Cek niche untuk akun baru' }}
+                    {{ rankingNiches ? 'Mengambil data… (~1–2 mnt)' : 'Cek niche (data)' }}
                 </button>
             </div>
             <div v-if="nichesLoading" class="text-sm text-slate-500">Memuat katalog niche pasar…</div>
@@ -251,7 +258,8 @@ onMounted(load);
                         :class="niche === n.slug || niche === n.label ? 'text-teal-50' : 'text-slate-500'"
                     >
                         <span v-if="n.competition">Kompetisi {{ n.competition }}</span>
-                        <span v-if="!n.viral_score && n.viral_score !== 0">Belum di-rank</span>
+                        <span v-if="n.metrics">· Trends {{ Math.round(n.metrics.google_interest || 0) }} · YT views {{ Number(n.metrics.youtube_avg_views || 0).toLocaleString() }}</span>
+                        <span v-else-if="n.viral_score == null">Belum di-rank (data)</span>
                     </span>
                     <span
                         v-if="n.why"
@@ -259,13 +267,6 @@ onMounted(load);
                         :class="niche === n.slug || niche === n.label ? 'text-teal-100' : 'text-slate-600'"
                     >
                         {{ n.why }}
-                    </span>
-                    <span
-                        v-if="n.fit_for_new_account"
-                        class="mt-1 block line-clamp-2 text-[11px] font-medium"
-                        :class="niche === n.slug || niche === n.label ? 'text-white' : 'text-teal-900'"
-                    >
-                        Akun baru: {{ n.fit_for_new_account }}
                     </span>
                 </button>
             </div>

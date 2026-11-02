@@ -60,6 +60,108 @@ class YouTubeTrendsService
     }
 
     /**
+     * Probe 1 keyword tanpa bias niche psikologi — untuk ranking niche pasar.
+     *
+     * @return array{
+     *   videos: int,
+     *   total_views: int,
+     *   avg_views: int,
+     *   top_views: int,
+     *   unique_channels: int,
+     *   error: ?string
+     * }
+     */
+    public function probeKeyword(string $keyword, string $region = 'ID', int $days = 14): array
+    {
+        $empty = [
+            'videos' => 0,
+            'total_views' => 0,
+            'avg_views' => 0,
+            'top_views' => 0,
+            'unique_channels' => 0,
+            'error' => null,
+        ];
+
+        $apiKey = trim((string) config('radar.youtube_api_key'));
+        if ($apiKey === '') {
+            $empty['error'] = 'YOUTUBE_API_KEY kosong';
+
+            return $empty;
+        }
+
+        $keyword = trim($keyword);
+        if ($keyword === '') {
+            return $empty;
+        }
+
+        $region = strtoupper($region) === 'US' ? 'US' : 'ID';
+        $lang = $region === 'US' ? 'en' : 'id';
+        $since = now()->subDays(max(3, $days))->utc()->format('Y-m-d\TH:i:s\Z');
+
+        try {
+            $response = Http::timeout(20)
+                ->withHeaders($this->browserHeaders())
+                ->get('https://www.googleapis.com/youtube/v3/search', [
+                    'part' => 'snippet',
+                    'q' => $keyword,
+                    'type' => 'video',
+                    'order' => 'viewCount',
+                    'publishedAfter' => $since,
+                    'maxResults' => 5,
+                    'relevanceLanguage' => $lang,
+                    'regionCode' => $region,
+                    'key' => $apiKey,
+                ]);
+
+            if (! $response->successful()) {
+                $empty['error'] = data_get($response->json(), 'error.message')
+                    ?: 'HTTP '.$response->status().' dari YouTube API';
+
+                return $empty;
+            }
+
+            $rows = $response->json('items') ?? [];
+            $videoIds = collect($rows)
+                ->map(fn ($row) => data_get($row, 'id.videoId'))
+                ->filter()
+                ->values()
+                ->all();
+            $statsMap = $this->videoStatsMap($videoIds, $apiKey);
+
+            $views = [];
+            $channels = [];
+            foreach ($rows as $video) {
+                $videoId = data_get($video, 'id.videoId');
+                if (! $videoId) {
+                    continue;
+                }
+                $v = (int) data_get($statsMap, $videoId.'.viewCount', 0);
+                $views[] = $v;
+                $ch = (string) data_get($video, 'snippet.channelTitle', '');
+                if ($ch !== '') {
+                    $channels[$ch] = true;
+                }
+            }
+
+            $total = array_sum($views);
+            $count = count($views);
+
+            return [
+                'videos' => $count,
+                'total_views' => $total,
+                'avg_views' => $count > 0 ? (int) round($total / $count) : 0,
+                'top_views' => $count > 0 ? (int) max($views) : 0,
+                'unique_channels' => count($channels),
+                'error' => null,
+            ];
+        } catch (\Throwable $e) {
+            $empty['error'] = $e->getMessage();
+
+            return $empty;
+        }
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     private function searchVideos(

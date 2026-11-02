@@ -203,12 +203,16 @@ async function refreshNicheRank() {
     ranking.value = true;
     error.value = '';
     try {
-        const { data } = await http.post('/niches/refresh-rank', { region: form.region || 'ID' });
+        const { data } = await http.post(
+            '/niches/refresh-rank',
+            { region: form.region || 'ID' },
+            { timeout: 180000 },
+        );
         niches.value = data.data || [];
-        message.value = 'Ranking niche untuk akun baru diperbarui (cache 24 jam).';
+        message.value = 'Ranking niche berbasis data (Google Trends + YouTube). Cache 12 jam.';
         showNicheBrowse.value = true;
     } catch (e) {
-        error.value = e.response?.data?.message || 'Gagal refresh ranking niche.';
+        error.value = e.response?.data?.message || 'Gagal hitung ranking niche dari data.';
     } finally {
         ranking.value = false;
     }
@@ -347,7 +351,7 @@ onMounted(async () => {
                         <div>
                             <p class="text-sm font-semibold text-teal-950">Pilih niche pasar · {{ form.region }}</p>
                             <p class="text-[11px] text-teal-800">
-                                Untuk akun/profil baru: psikologi, komedi, kuliner, dll. Ranking AI di Auto Radar.
+                                Ranking data: Google Trends + YouTube views (bukan AI). Atau cek di Auto Radar.
                             </p>
                         </div>
                         <button
@@ -356,7 +360,7 @@ onMounted(async () => {
                             :disabled="ranking"
                             @click="refreshNicheRank"
                         >
-                            {{ ranking ? 'Menganalisa…' : 'Cek niche untuk akun baru' }}
+                            {{ ranking ? 'Mengambil data…' : 'Cek niche (data)' }}
                         </button>
                     </div>
                     <div class="grid gap-2 sm:grid-cols-2">
@@ -380,12 +384,12 @@ onMounted(async () => {
                             </span>
                             <span class="block text-[11px] text-slate-500">
                                 <template v-if="n.competition">Kompetisi {{ n.competition }} · </template>
-                                {{ (n.keywords || []).slice(0, 3).join(', ') }}
+                                <template v-if="n.metrics">
+                                    Trends {{ Math.round(n.metrics.google_interest || 0) }} · YT {{ Number(n.metrics.youtube_avg_views || 0).toLocaleString() }} views
+                                </template>
+                                <template v-else>{{ (n.keywords || []).slice(0, 3).join(', ') }}</template>
                             </span>
                             <span v-if="n.why" class="mt-1 block text-[11px] text-teal-800">{{ n.why }}</span>
-                            <span v-if="n.fit_for_new_account" class="mt-1 block text-[11px] font-medium text-teal-950">
-                                Akun baru: {{ n.fit_for_new_account }}
-                            </span>
                         </button>
                     </div>
                 </div>
