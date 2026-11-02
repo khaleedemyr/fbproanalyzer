@@ -55,7 +55,7 @@ async function refreshNicheRank() {
         niches.value = res.data || [];
         nicheTop.value = res.top || (res.data || []).slice(0, 5);
         nicheRankedAt.value = res.ranked_at || null;
-        message.value = 'Ranking niche diperbarui (Gemini, cache 24 jam).';
+        message.value = 'Ranking niche untuk akun baru diperbarui (cache 24 jam).';
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal refresh ranking niche.';
     } finally {
@@ -205,22 +205,23 @@ onMounted(load);
         <section class="rounded-xl border border-teal-200 bg-white p-4 shadow-sm">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                    <h3 class="text-base font-semibold text-slate-900">Niche yang lagi viral · {{ region }}</h3>
-                    <p class="text-xs text-slate-500">
-                        Skor dari sinyal Radar (14 hari) atau ranking Gemini.
-                        <span v-if="nicheRankedAt"> · Gemini: {{ nicheRankedAt }}</span>
+                    <h3 class="text-base font-semibold text-slate-900">Niche untuk akun baru · {{ region }}</h3>
+                    <p class="mt-0.5 max-w-2xl text-xs text-slate-500">
+                        Bukan topik yang sudah kamu isi. Ini kandidat niche pasar (psikologi, komedi, kuliner, …)
+                        — bantu pilih fokus akun baru. Klik “Cek niche…” untuk ranking AI.
+                        <span v-if="nicheRankedAt"> · update {{ nicheRankedAt }}</span>
                     </p>
                 </div>
                 <button
                     type="button"
-                    class="rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-950 disabled:opacity-60"
+                    class="rounded-lg bg-teal-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
                     :disabled="rankingNiches || nichesLoading"
                     @click="refreshNicheRank"
                 >
-                    {{ rankingNiches ? 'Ranking…' : 'Refresh ranking Gemini' }}
+                    {{ rankingNiches ? 'Menganalisa…' : 'Cek niche untuk akun baru' }}
                 </button>
             </div>
-            <div v-if="nichesLoading" class="text-sm text-slate-500">Memuat katalog niche…</div>
+            <div v-if="nichesLoading" class="text-sm text-slate-500">Memuat katalog niche pasar…</div>
             <div v-else class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 <button
                     v-for="(n, i) in niches"
@@ -234,21 +235,23 @@ onMounted(load);
                 >
                     <span class="flex items-start justify-between gap-2">
                         <span class="text-sm font-semibold">
-                            <span class="opacity-60">#{{ i + 1 }}</span> {{ n.label }}
+                            <template v-if="n.viral_score != null"><span class="opacity-60">#{{ i + 1 }}</span> </template>
+                            {{ n.label }}
                         </span>
                         <span
+                            v-if="n.viral_score != null"
                             class="shrink-0 rounded-md px-2 py-0.5 text-xs font-bold"
                             :class="niche === n.slug || niche === n.label ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-800'"
                         >
-                            {{ Math.round(n.viral_score || 0) }}
+                            {{ Math.round(n.viral_score) }}
                         </span>
                     </span>
                     <span
-                        class="mt-1 block text-[11px]"
+                        class="mt-1 flex flex-wrap gap-1 text-[11px]"
                         :class="niche === n.slug || niche === n.label ? 'text-teal-50' : 'text-slate-500'"
                     >
-                        {{ n.score_source === 'gemini' ? 'Gemini' : n.score_source === 'radar' ? 'Radar heat' : 'Katalog' }}
-                        <template v-if="n.radar_signals"> · {{ n.radar_signals }} sinyal</template>
+                        <span v-if="n.competition">Kompetisi {{ n.competition }}</span>
+                        <span v-if="!n.viral_score && n.viral_score !== 0">Belum di-rank</span>
                     </span>
                     <span
                         v-if="n.why"
@@ -257,10 +260,19 @@ onMounted(load);
                     >
                         {{ n.why }}
                     </span>
+                    <span
+                        v-if="n.fit_for_new_account"
+                        class="mt-1 block line-clamp-2 text-[11px] font-medium"
+                        :class="niche === n.slug || niche === n.label ? 'text-white' : 'text-teal-900'"
+                    >
+                        Akun baru: {{ n.fit_for_new_account }}
+                    </span>
                 </button>
             </div>
             <p v-if="!nichesLoading && !niches.length" class="text-sm text-slate-500">Katalog niche kosong.</p>
-            <p class="mt-2 text-[11px] text-slate-500">Klik niche untuk filter Radar + sync keyword. Set niche ke Brand Kit di halaman Brand Kit.</p>
+            <p class="mt-2 text-[11px] text-slate-500">
+                Klik niche = filter Radar. Untuk set ke profil Brand Kit baru: buka Brand Kit → Browse niche → pilih.
+            </p>
         </section>
 
         <div v-if="loading" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat sinyal...</div>

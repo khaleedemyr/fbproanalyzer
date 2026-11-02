@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\BrandKit;
-use App\Models\TrendSignal;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -13,111 +12,57 @@ use Illuminate\Support\Facades\Log;
 
 class NicheController extends Controller
 {
+    /**
+     * Katalog niche pasar + ranking "layak untuk akun baru" (bukan niche yang sudah diisi user).
+     */
     public function index(Request $request): JsonResponse
     {
         $region = BrandKit::normalizeRegion($request->string('region')->toString() ?: 'ID');
         $catalog = config('niches.'.$region, config('niches.ID', []));
-
         $ranked = Cache::get($this->rankCacheKey($region));
-        $heat = $this->radarHeatByNiche($region, $catalog);
 
-        $items = collect($catalog)->map(function (array $row) use ($ranked, $heat) {
+        $items = collect($catalog)->map(function (array $row) use ($ranked) {
             $slug = (string) ($row['slug'] ?? '');
             $rank = is_array($ranked) ? ($ranked[$slug] ?? null) : null;
-            $radar = $heat[$slug] ?? ['signals' => 0, 'avg_score' => 0.0, 'heat' => 0.0];
-            $geminiScore = is_array($rank) ? ($rank['score'] ?? null) : null;
-            // Tampilkan skor viral: Gemini dulu, fallback heat dari sinyal Radar.
-            $viralScore = $geminiScore !== null ? (float) $geminiScore : (float) $radar['heat'];
+            $hasRank = is_array($rank) && array_key_exists('score', $rank);
 
             return [
                 'slug' => $slug,
                 'label' => (string) ($row['label'] ?? $slug),
                 'hashtags' => (string) ($row['hashtags'] ?? ''),
                 'keywords' => array_values($row['keywords'] ?? []),
-                'viral_score' => round($viralScore, 1),
-                'score_source' => $geminiScore !== null ? 'gemini' : ($radar['signals'] > 0 ? 'radar' : 'catalog'),
-                'radar_signals' => (int) $radar['signals'],
-                'why' => is_array($rank) && ! empty($rank['why'])
-                    ? (string) $rank['why']
-                    : ($radar['signals'] > 0
-                        ? 'Ada '.$radar['signals'].' sinyal Radar · avg skor '.round((float) $radar['avg_score'], 1)
-                        : 'Belum ada sinyal Radar — jalankan Auto Radar atau Refresh ranking Gemini'),
+                'viral_score' => $hasRank ? round((float) $rank['score'], 1) : null,
+                'score_source' => $hasRank ? 'gemini' : null,
+                'competition' => $hasRank ? (string) ($rank['competition'] ?? '') : null,
+                'fit_for_new_account' => $hasRank ? (string) ($rank['fit_for_new_account'] ?? '') : null,
+                'why' => $hasRank
+                    ? (string) ($rank['why'] ?? '')
+                    : 'Klik “Cek niche untuk akun baru” agar AI ranking niche pasar (psikologi, komedi, kuliner, …).',
             ];
-        })->sortByDesc(fn ($i) => (float) ($i['viral_score'] ?? 0))->values();
+        });
+
+        if (is_array($ranked) && $ranked !== []) {
+            $items = $items->sortByDesc(fn ($i) => (float) ($i['viral_score'] ?? -1))->values();
+        } else {
+            $items = $items->values();
+        }
+
+        $top = $items->filter(fn ($i) => $i['viral_score'] !== null)->take(5)->values();
 
         return response()->json([
             'region' => $region,
+            'purpose' => 'new_account_niche',
             'data' => $items,
             'ranked_at' => Cache::get($this->rankCacheKey($region).'_at'),
-            'top' => $items->take(5)->values(),
+            'top' => $top,
+            'message' => is_array($ranked) && $ranked !== []
+                ? 'Ranking niche pasar untuk akun baru (cache 24 jam).'
+                : 'Belum ada ranking. Jalankan cek niche untuk akun baru.',
         ]);
     }
 
     /**
-     * Heat niche dari TrendSignal di region (match keyword / niche slug).
-     *
-     * @param  array<int, array<string, mixed>>  $catalog
-     * @return array<string, array{signals:int, avg_score:float, heat:float}>
-     */
-    protected function radarHeatByNiche(string $region, array $catalog): array
-    {
-        $signals = TrendSignal::query()
-            ->where('region', $region)
-            ->where('observed_at', '>=', now()->subDays(14))
-            ->orderByDesc('observed_at')
-            ->limit(500)
-            ->get(['niche', 'keyword', 'title', 'viral_score']);
-
-        $out = [];
-        foreach ($catalog as $row) {
-            $slug = (string) ($row['slug'] ?? '');
-            if ($slug === '') {
-                continue;
-            }
-            $needles = array_map('mb_strtolower', array_merge(
-                [$slug, (string) ($row['label'] ?? '')],
-                array_values($row['keywords'] ?? [])
-            ));
-            $needles = array_values(array_filter(array_unique($needles)));
-
-            $matched = $signals->filter(function ($s) use ($slug, $needles) {
-                $hay = mb_strtolower(trim(implode(' ', [
-                    (string) $s->niche,
-                    (string) $s->keyword,
-                    (string) $s->title,
-                ])));
-                if ($hay === '') {
-                    return false;
-                }
-                if ($s->niche && mb_strtolower((string) $s->niche) === $slug) {
-                    return true;
-                }
-                foreach ($needles as $n) {
-                    if ($n !== '' && str_contains($hay, $n)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            });
-
-            $count = $matched->count();
-            $avg = $count > 0 ? (float) $matched->avg('viral_score') : 0.0;
-            // Heat 0–100: volume + kualitas skor sinyal.
-            $heat = $count === 0 ? 0.0 : min(100, round(($avg * 0.65) + min(35, $count * 4), 1));
-
-            $out[$slug] = [
-                'signals' => $count,
-                'avg_score' => $avg,
-                'heat' => $heat,
-            ];
-        }
-
-        return $out;
-    }
-
-    /**
-     * Refresh ranking singkat via Gemini (cache 24 jam).
+     * Ranking niche pasar via Gemini: mana yang layak dipilih untuk AKUN BARU.
      */
     public function refreshRank(Request $request): JsonResponse
     {
@@ -134,25 +79,31 @@ class NicheController extends Controller
 
         $labels = collect($catalog)->map(fn ($r) => ($r['slug'] ?? '').': '.($r['label'] ?? ''))->implode("\n");
         $geo = $region === 'US' ? 'United States' : 'Indonesia';
+        $lang = $region === 'US' ? 'English' : 'Bahasa Indonesia';
         $model = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
         $prompt = <<<PROMPT
-Kamu strategist konten short-form untuk pasar {$geo}.
-Berikut daftar niche:
+Kamu strategist growth short-form (Reels / TikTok / Shorts) untuk pasar {$geo}.
+Tugas: bantu creator memilih NICHE untuk AKUN BARU (bukan topik video harian).
+
+Kandidat niche pasar:
 {$labels}
 
-Skorkan potensi viral hari ini (0-100) untuk tiap slug. JSON saja:
-{"ranks":[{"slug":"...","score":80,"why":"1 kalimat"}]}
+Skorkan tiap slug 0–100 seberapa LAYAK dipilih sebagai niche akun baru minggu ini.
+Pertimbangkan: demand/viralitas saat ini, kompetisi creator, kemudahan konsisten upload, potensi monetisasi/brand deal, saturasi.
+
+Jawab JSON saja (field why & fit_for_new_account dalam {$lang}):
+{"ranks":[{"slug":"...","score":80,"competition":"low|mid|high","why":"1 kalimat kenapa niche ini hot/layak","fit_for_new_account":"1 kalimat saran sudut untuk akun baru"}]}
 PROMPT;
 
         try {
-            $response = Http::timeout(40)->post(
+            $response = Http::timeout(50)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$key}",
                 [
                     'contents' => [['parts' => [['text' => $prompt]]]],
                     'generationConfig' => [
-                        'temperature' => 0.4,
+                        'temperature' => 0.35,
                         'responseMimeType' => 'application/json',
-                        'maxOutputTokens' => 2048,
+                        'maxOutputTokens' => 4096,
                     ],
                 ]
             );
@@ -182,9 +133,15 @@ PROMPT;
                 if (! is_array($row) || empty($row['slug'])) {
                     continue;
                 }
+                $comp = strtolower(trim((string) ($row['competition'] ?? 'mid')));
+                if (! in_array($comp, ['low', 'mid', 'high'], true)) {
+                    $comp = 'mid';
+                }
                 $map[(string) $row['slug']] = [
                     'score' => (float) ($row['score'] ?? 0),
                     'why' => (string) ($row['why'] ?? ''),
+                    'competition' => $comp,
+                    'fit_for_new_account' => (string) ($row['fit_for_new_account'] ?? ''),
                 ];
             }
 
@@ -201,6 +158,6 @@ PROMPT;
 
     protected function rankCacheKey(string $region): string
     {
-        return 'niche_rank_'.$region;
+        return 'niche_new_account_rank_'.$region;
     }
 }

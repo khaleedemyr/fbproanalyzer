@@ -205,7 +205,7 @@ async function refreshNicheRank() {
     try {
         const { data } = await http.post('/niches/refresh-rank', { region: form.region || 'ID' });
         niches.value = data.data || [];
-        message.value = 'Ranking niche diperbarui (cache 24 jam).';
+        message.value = 'Ranking niche untuk akun baru diperbarui (cache 24 jam).';
         showNicheBrowse.value = true;
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal refresh ranking niche.';
@@ -225,7 +225,7 @@ onMounted(async () => {
         <div>
             <h2 class="text-2xl font-semibold text-slate-900">Brand Kit / Profil</h2>
             <p class="mt-1 text-sm text-slate-500">
-                Multi profil brand — pilih yang aktif untuk Brief Studio &amp; Blueprint. Browse niche viral ID/US di bawah.
+                Multi profil brand — pilih yang aktif untuk Brief Studio &amp; Blueprint. Butuh niche akun baru? Browse katalog pasar (psikologi, komedi, …) atau cek ranking di Auto Radar.
             </p>
         </div>
 
@@ -317,7 +317,7 @@ onMounted(async () => {
                         <span class="mb-1 flex items-center justify-between text-xs font-semibold text-slate-500">
                             <span>Niche</span>
                             <button type="button" class="text-teal-700" @click="showNicheBrowse = !showNicheBrowse">
-                                {{ showNicheBrowse ? 'Tutup browse' : 'Browse niche viral' }}
+                                {{ showNicheBrowse ? 'Tutup browse' : 'Browse niche pasar' }}
                             </button>
                         </span>
                         <input v-model="form.niche" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
@@ -345,8 +345,10 @@ onMounted(async () => {
                 <div v-if="showNicheBrowse" class="rounded-xl border border-teal-100 bg-teal-50/50 p-4">
                     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <p class="text-sm font-semibold text-teal-950">Niche viral · {{ form.region }}</p>
-                            <p class="text-[11px] text-teal-800">Urut skor tinggi → rendah. Detail lengkap juga di Auto Radar.</p>
+                            <p class="text-sm font-semibold text-teal-950">Pilih niche pasar · {{ form.region }}</p>
+                            <p class="text-[11px] text-teal-800">
+                                Untuk akun/profil baru: psikologi, komedi, kuliner, dll. Ranking AI di Auto Radar.
+                            </p>
                         </div>
                         <button
                             type="button"
@@ -354,7 +356,7 @@ onMounted(async () => {
                             :disabled="ranking"
                             @click="refreshNicheRank"
                         >
-                            {{ ranking ? 'Ranking…' : 'Refresh ranking (Gemini)' }}
+                            {{ ranking ? 'Menganalisa…' : 'Cek niche untuk akun baru' }}
                         </button>
                     </div>
                     <div class="grid gap-2 sm:grid-cols-2">
@@ -366,16 +368,24 @@ onMounted(async () => {
                             @click="applyNiche(n)"
                         >
                             <span class="flex items-start justify-between gap-2">
-                                <span class="text-sm font-semibold text-slate-900">#{{ i + 1 }} {{ n.label }}</span>
-                                <span class="shrink-0 rounded-md bg-teal-50 px-2 py-0.5 text-xs font-bold text-teal-800">
-                                    {{ Math.round(n.viral_score || 0) }}
+                                <span class="text-sm font-semibold text-slate-900">
+                                    <template v-if="n.viral_score != null">#{{ i + 1 }} </template>{{ n.label }}
+                                </span>
+                                <span
+                                    v-if="n.viral_score != null"
+                                    class="shrink-0 rounded-md bg-teal-50 px-2 py-0.5 text-xs font-bold text-teal-800"
+                                >
+                                    {{ Math.round(n.viral_score) }}
                                 </span>
                             </span>
                             <span class="block text-[11px] text-slate-500">
-                                {{ n.score_source === 'gemini' ? 'Gemini' : n.score_source === 'radar' ? 'Radar heat' : 'Katalog' }}
-                                · {{ (n.keywords || []).slice(0, 3).join(', ') }}
+                                <template v-if="n.competition">Kompetisi {{ n.competition }} · </template>
+                                {{ (n.keywords || []).slice(0, 3).join(', ') }}
                             </span>
                             <span v-if="n.why" class="mt-1 block text-[11px] text-teal-800">{{ n.why }}</span>
+                            <span v-if="n.fit_for_new_account" class="mt-1 block text-[11px] font-medium text-teal-950">
+                                Akun baru: {{ n.fit_for_new_account }}
+                            </span>
                         </button>
                     </div>
                 </div>
