@@ -80,7 +80,6 @@ class NicheController extends Controller
         $labels = collect($catalog)->map(fn ($r) => ($r['slug'] ?? '').': '.($r['label'] ?? ''))->implode("\n");
         $geo = $region === 'US' ? 'United States' : 'Indonesia';
         $lang = $region === 'US' ? 'English' : 'Bahasa Indonesia';
-        $model = (string) config('blueprint.gemini_model', 'gemini-3.8-flash');
         $prompt = <<<PROMPT
 Kamu strategist growth short-form (Reels / TikTok / Shorts) untuk pasar {$geo}.
 Tugas: bantu creator memilih NICHE untuk AKUN BARU (bukan topik video harian).
@@ -95,37 +94,81 @@ Jawab JSON saja (field why & fit_for_new_account dalam {$lang}):
 {"ranks":[{"slug":"...","score":80,"competition":"low|mid|high","why":"1 kalimat kenapa niche ini hot/layak","fit_for_new_account":"1 kalimat saran sudut untuk akun baru"}]}
 PROMPT;
 
-        try {
-            $response = Http::timeout(50)->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$key}",
-                [
-                    'contents' => [['parts' => [['text' => $prompt]]]],
-                    'generationConfig' => [
-                        'temperature' => 0.35,
-                        'responseMimeType' => 'application/json',
-                        'maxOutputTokens' => 4096,
-                    ],
-                ]
-            );
-            if (! $response->successful()) {
-                return response()->json([
-                    'message' => 'Gemini gagal: '.(data_get($response->json(), 'error.message') ?: 'HTTP '.$response->status()),
-                ], 422);
+        // Model di .env server sering masih gemini-1.5-flash (sudah hang/timeout).
+        // Coba primary + fallbacks; model 1.5 dipindah ke belakang.
+        $models = array_values(array_unique(array_filter([
+            (string) config('blueprint.gemini_model', 'gemini-3.8-flash'),
+            ...((array) config('blueprint.gemini_model_fallbacks', [])),
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+        ])));
+        usort($models, function (string $a, string $b): int {
+            $score = static fn (string $m): int => str_contains($m, '1.5') || str_contains($m, '1.0') ? 1 : 0;
+
+            return $score($a) <=> $score($b);
+        });
+
+        $tried = [];
+        $text = '';
+        $usedModel = null;
+
+        foreach ($models as $model) {
+            try {
+                $response = Http::timeout(28)->post(
+                    "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$key}",
+                    [
+                        'contents' => [['parts' => [['text' => $prompt]]]],
+                        'generationConfig' => [
+                            'temperature' => 0.35,
+                            'responseMimeType' => 'application/json',
+                            'maxOutputTokens' => 4096,
+                        ],
+                    ]
+                );
+            } catch (\Throwable $e) {
+                $tried[] = $model.': '.$e->getMessage();
+                Log::warning('niche.rank_model_fail', ['model' => $model, 'error' => $e->getMessage()]);
+
+                continue;
             }
 
-            $text = '';
+            if (! $response->successful()) {
+                $tried[] = $model.': '.(data_get($response->json(), 'error.message') ?: 'HTTP '.$response->status());
+
+                continue;
+            }
+
+            $chunk = '';
             foreach ((array) data_get($response->json(), 'candidates.0.content.parts', []) as $part) {
                 if (is_array($part) && isset($part['text'])) {
-                    $text .= (string) $part['text'];
+                    $chunk .= (string) $part['text'];
                 }
             }
+            if ($chunk === '') {
+                $tried[] = $model.': empty response';
+
+                continue;
+            }
+
+            $text = $chunk;
+            $usedModel = $model;
+            break;
+        }
+
+        if ($text === '' || $usedModel === null) {
+            return response()->json([
+                'message' => 'Gemini timeout/gagal. Update .env: GEMINI_MODEL=gemini-2.5-flash (bukan 1.5), lalu config:clear. Tried: '.implode(' | ', array_slice($tried, 0, 3)),
+            ], 422);
+        }
+
+        try {
             $decoded = json_decode($text, true);
             if (! is_array($decoded)) {
                 $decoded = json_decode(preg_replace('/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/', '$1', $text) ?? '', true);
             }
             $ranks = $decoded['ranks'] ?? null;
             if (! is_array($ranks)) {
-                return response()->json(['message' => 'Respons ranking tidak valid.'], 422);
+                return response()->json(['message' => 'Respons ranking tidak valid dari '.$usedModel.'.'], 422);
             }
 
             $map = [];
@@ -148,9 +191,13 @@ PROMPT;
             Cache::put($this->rankCacheKey($region), $map, now()->addDay());
             Cache::put($this->rankCacheKey($region).'_at', now()->toDateTimeString(), now()->addDay());
 
-            return $this->index($request->merge(['region' => $region]));
+            $payload = $this->index($request->merge(['region' => $region]));
+            $json = $payload->getData(true);
+            $json['model'] = $usedModel;
+
+            return response()->json($json);
         } catch (\Throwable $e) {
-            Log::warning('niche.rank_fail', ['error' => $e->getMessage()]);
+            Log::warning('niche.rank_fail', ['error' => $e->getMessage(), 'model' => $usedModel]);
 
             return response()->json(['message' => 'Gagal refresh ranking: '.$e->getMessage()], 500);
         }
