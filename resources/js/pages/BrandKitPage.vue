@@ -344,7 +344,10 @@ onMounted(async () => {
 
                 <div v-if="showNicheBrowse" class="rounded-xl border border-teal-100 bg-teal-50/50 p-4">
                     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-sm font-semibold text-teal-950">Katalog niche · {{ form.region }}</p>
+                        <div>
+                            <p class="text-sm font-semibold text-teal-950">Niche viral · {{ form.region }}</p>
+                            <p class="text-[11px] text-teal-800">Urut skor tinggi → rendah. Detail lengkap juga di Auto Radar.</p>
+                        </div>
                         <button
                             type="button"
                             class="rounded-lg border border-teal-300 bg-white px-3 py-1.5 text-xs font-semibold text-teal-900 disabled:opacity-60"
@@ -356,16 +359,21 @@ onMounted(async () => {
                     </div>
                     <div class="grid gap-2 sm:grid-cols-2">
                         <button
-                            v-for="n in niches"
+                            v-for="(n, i) in niches"
                             :key="n.slug"
                             type="button"
                             class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left hover:border-teal-400"
                             @click="applyNiche(n)"
                         >
-                            <span class="block text-sm font-semibold text-slate-900">{{ n.label }}</span>
+                            <span class="flex items-start justify-between gap-2">
+                                <span class="text-sm font-semibold text-slate-900">#{{ i + 1 }} {{ n.label }}</span>
+                                <span class="shrink-0 rounded-md bg-teal-50 px-2 py-0.5 text-xs font-bold text-teal-800">
+                                    {{ Math.round(n.viral_score || 0) }}
+                                </span>
+                            </span>
                             <span class="block text-[11px] text-slate-500">
-                                <template v-if="n.viral_score != null">Skor {{ Math.round(n.viral_score) }} · </template>
-                                {{ (n.keywords || []).slice(0, 3).join(', ') }}
+                                {{ n.score_source === 'gemini' ? 'Gemini' : n.score_source === 'radar' ? 'Radar heat' : 'Katalog' }}
+                                · {{ (n.keywords || []).slice(0, 3).join(', ') }}
                             </span>
                             <span v-if="n.why" class="mt-1 block text-[11px] text-teal-800">{{ n.why }}</span>
                         </button>

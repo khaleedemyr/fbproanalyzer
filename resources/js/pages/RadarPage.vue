@@ -13,6 +13,11 @@ const error = ref('');
 const warnings = ref([]);
 const region = ref('ID');
 const niche = ref('');
+const niches = ref([]);
+const nicheTop = ref([]);
+const nicheRankedAt = ref(null);
+const rankingNiches = ref(false);
+const nichesLoading = ref(false);
 
 const sourceLabel = {
     youtube: 'YouTube',
@@ -25,6 +30,43 @@ const sourceBadge = {
     google_trends: 'bg-blue-50 text-blue-700',
     keyword_radar: 'bg-sky-50 text-sky-800',
 };
+
+async function loadNiches() {
+    nichesLoading.value = true;
+    try {
+        const { data: res } = await http.get('/niches', { params: { region: region.value } });
+        niches.value = res.data || [];
+        nicheTop.value = res.top || (res.data || []).slice(0, 5);
+        nicheRankedAt.value = res.ranked_at || null;
+    } catch {
+        niches.value = [];
+        nicheTop.value = [];
+    } finally {
+        nichesLoading.value = false;
+    }
+}
+
+async function refreshNicheRank() {
+    rankingNiches.value = true;
+    message.value = '';
+    error.value = '';
+    try {
+        const { data: res } = await http.post('/niches/refresh-rank', { region: region.value });
+        niches.value = res.data || [];
+        nicheTop.value = res.top || (res.data || []).slice(0, 5);
+        nicheRankedAt.value = res.ranked_at || null;
+        message.value = 'Ranking niche diperbarui (Gemini, cache 24 jam).';
+    } catch (e) {
+        error.value = e.response?.data?.message || 'Gagal refresh ranking niche.';
+    } finally {
+        rankingNiches.value = false;
+    }
+}
+
+function pickNiche(n) {
+    niche.value = n.slug || n.label || '';
+    load();
+}
 
 async function load() {
     loading.value = true;
@@ -44,6 +86,7 @@ async function load() {
     } finally {
         loading.value = false;
     }
+    await loadNiches();
 }
 
 async function runSync() {
@@ -120,7 +163,11 @@ onMounted(load);
             <div class="flex flex-wrap items-end gap-2">
                 <label class="text-sm">
                     <span class="mb-1 block text-[11px] font-semibold uppercase text-slate-500">Region</span>
-                    <select v-model="region" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" @change="load">
+                    <select
+                        v-model="region"
+                        class="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        @change="() => { niche = ''; load(); }"
+                    >
                         <option value="ID">Indonesia (ID)</option>
                         <option value="US">United States (US)</option>
                     </select>
@@ -154,6 +201,67 @@ onMounted(load);
         <div v-if="data && !data.youtube_configured" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             YouTube API key belum terbaca. Pastikan di `.env` server ada `YOUTUBE_API_KEY=...` lalu `php artisan config:clear`.
         </div>
+
+        <section class="rounded-xl border border-teal-200 bg-white p-4 shadow-sm">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h3 class="text-base font-semibold text-slate-900">Niche yang lagi viral · {{ region }}</h3>
+                    <p class="text-xs text-slate-500">
+                        Skor dari sinyal Radar (14 hari) atau ranking Gemini.
+                        <span v-if="nicheRankedAt"> · Gemini: {{ nicheRankedAt }}</span>
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="rounded-lg border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-950 disabled:opacity-60"
+                    :disabled="rankingNiches || nichesLoading"
+                    @click="refreshNicheRank"
+                >
+                    {{ rankingNiches ? 'Ranking…' : 'Refresh ranking Gemini' }}
+                </button>
+            </div>
+            <div v-if="nichesLoading" class="text-sm text-slate-500">Memuat katalog niche…</div>
+            <div v-else class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <button
+                    v-for="(n, i) in niches"
+                    :key="n.slug"
+                    type="button"
+                    class="rounded-lg border px-3 py-2.5 text-left transition hover:border-teal-400"
+                    :class="niche === n.slug || niche === n.label
+                        ? 'border-teal-600 bg-teal-700 text-white'
+                        : 'border-slate-200 bg-slate-50/80 text-slate-900'"
+                    @click="pickNiche(n)"
+                >
+                    <span class="flex items-start justify-between gap-2">
+                        <span class="text-sm font-semibold">
+                            <span class="opacity-60">#{{ i + 1 }}</span> {{ n.label }}
+                        </span>
+                        <span
+                            class="shrink-0 rounded-md px-2 py-0.5 text-xs font-bold"
+                            :class="niche === n.slug || niche === n.label ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-800'"
+                        >
+                            {{ Math.round(n.viral_score || 0) }}
+                        </span>
+                    </span>
+                    <span
+                        class="mt-1 block text-[11px]"
+                        :class="niche === n.slug || niche === n.label ? 'text-teal-50' : 'text-slate-500'"
+                    >
+                        {{ n.score_source === 'gemini' ? 'Gemini' : n.score_source === 'radar' ? 'Radar heat' : 'Katalog' }}
+                        <template v-if="n.radar_signals"> · {{ n.radar_signals }} sinyal</template>
+                    </span>
+                    <span
+                        v-if="n.why"
+                        class="mt-1 block line-clamp-2 text-[11px]"
+                        :class="niche === n.slug || niche === n.label ? 'text-teal-100' : 'text-slate-600'"
+                    >
+                        {{ n.why }}
+                    </span>
+                </button>
+            </div>
+            <p v-if="!nichesLoading && !niches.length" class="text-sm text-slate-500">Katalog niche kosong.</p>
+            <p class="mt-2 text-[11px] text-slate-500">Klik niche untuk filter Radar + sync keyword. Set niche ke Brand Kit di halaman Brand Kit.</p>
+        </section>
 
         <div v-if="loading" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat sinyal...</div>
 
