@@ -498,6 +498,9 @@ onUnmounted(stopPoll);
                     </span>
                 </div>
                 <h2 class="mt-1 text-2xl font-semibold text-slate-900">{{ bp?.cover_theme || bp?.title || 'Blueprint' }}</h2>
+                <p v-if="bp?.brand_kit" class="mt-1 text-xs font-medium text-slate-600">
+                    Brand Kit: {{ bp.brand_kit.name }}{{ bp.brand_kit.niche ? ' · ' + bp.brand_kit.niche : '' }}{{ bp.brand_kit.region ? ' · ' + bp.brand_kit.region : '' }}
+                </p>
                 <p v-if="bp" class="mt-1 text-sm text-slate-500">{{ bp.story_concept }}</p>
                 <p v-if="bp && !isVisual" class="mt-1 text-xs text-slate-500">
                     Naskah: {{ durationLabel || '-' }} total ·

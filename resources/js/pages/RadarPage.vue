@@ -11,6 +11,8 @@ const data = ref(null);
 const message = ref('');
 const error = ref('');
 const warnings = ref([]);
+const region = ref('ID');
+const niche = ref('');
 
 const sourceLabel = {
     youtube: 'YouTube',
@@ -28,8 +30,15 @@ async function load() {
     loading.value = true;
     error.value = '';
     try {
-        const res = await http.get('/radar');
+        const res = await http.get('/radar', {
+            params: {
+                region: region.value,
+                niche: niche.value || undefined,
+            },
+        });
         data.value = res.data;
+        if (res.data.region) region.value = res.data.region;
+        if (res.data.niche && !niche.value) niche.value = res.data.niche;
     } catch (e) {
         error.value = e.response?.data?.message || 'Gagal memuat auto radar.';
     } finally {
@@ -43,7 +52,10 @@ async function runSync() {
     error.value = '';
     warnings.value = [];
     try {
-        const res = await http.post('/radar/sync');
+        const res = await http.post('/radar/sync', {
+            region: region.value,
+            niche: niche.value || undefined,
+        });
         const sources = res.data.result.sources || {};
         message.value = `${res.data.message} · YT ${sources.youtube || 0} · Google ${sources.google_trends || 0} · Keyword ${sources.keyword_radar || sources.seed || 0} · Ide ${res.data.result.ideas || 0}`;
         warnings.value = res.data.result.warnings || [];
@@ -105,14 +117,32 @@ onMounted(load);
                     Deteksi otomatis topik/konten yang sedang naik. Sumber dipisah: YouTube vs Google.
                 </p>
             </div>
-            <button
-                type="button"
-                class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                :disabled="syncing"
-                @click="runSync"
-            >
-                {{ syncing ? 'Mendeteksi...' : 'Jalankan Auto Radar' }}
-            </button>
+            <div class="flex flex-wrap items-end gap-2">
+                <label class="text-sm">
+                    <span class="mb-1 block text-[11px] font-semibold uppercase text-slate-500">Region</span>
+                    <select v-model="region" class="rounded-lg border border-slate-300 px-3 py-2 text-sm" @change="load">
+                        <option value="ID">Indonesia (ID)</option>
+                        <option value="US">United States (US)</option>
+                    </select>
+                </label>
+                <label class="text-sm">
+                    <span class="mb-1 block text-[11px] font-semibold uppercase text-slate-500">Niche</span>
+                    <input
+                        v-model="niche"
+                        class="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        placeholder="psikologi"
+                        @keyup.enter="load"
+                    />
+                </label>
+                <button
+                    type="button"
+                    class="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    :disabled="syncing"
+                    @click="runSync"
+                >
+                    {{ syncing ? 'Mendeteksi...' : 'Jalankan Auto Radar' }}
+                </button>
+            </div>
         </div>
 
         <p v-if="message" class="rounded-lg border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-900">{{ message }}</p>

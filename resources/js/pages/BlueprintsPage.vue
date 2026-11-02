@@ -23,6 +23,8 @@ const preferStock = ref(false);
 const voicePerspective = ref('Aku');
 const analyses = ref([]);
 const analysisId = ref('');
+const brandKits = ref([]);
+const brandKitId = ref('');
 
 const selectedAnalysis = computed(() => analyses.value.find((a) => String(a.id) === String(analysisId.value)) || null);
 
@@ -90,6 +92,17 @@ async function loadAnalyses() {
     }
 }
 
+async function loadBrandKits() {
+    try {
+        const { data } = await http.get('/brand-kits');
+        brandKits.value = data.data || [];
+        const active = data.active || brandKits.value.find((k) => k.is_active);
+        brandKitId.value = active ? String(active.id) : (brandKits.value[0] ? String(brandKits.value[0].id) : '');
+    } catch {
+        brandKits.value = [];
+    }
+}
+
 function applyHook(hook) {
     if (hook) topic.value = String(hook);
 }
@@ -111,6 +124,9 @@ async function generate() {
         };
         if (analysisId.value) {
             payload.analytics_ai_analysis_id = Number(analysisId.value);
+        }
+        if (brandKitId.value) {
+            payload.brand_kit_id = Number(brandKitId.value);
         }
         if (needsVoice.value) {
             payload.voice_perspective = voicePerspective.value || 'Aku';
@@ -159,7 +175,7 @@ onMounted(async () => {
     if (route.query.format && ['reels_vo', 'reels_panjang', 'reels_text', 'foto'].includes(String(route.query.format))) {
         format.value = String(route.query.format);
     }
-    await loadAnalyses();
+    await Promise.all([loadAnalyses(), loadBrandKits()]);
     if (route.query.analysis_id) {
         analysisId.value = String(route.query.analysis_id);
         if (!topic.value && selectedAnalysis.value?.title_hooks?.length) {
@@ -247,6 +263,14 @@ onMounted(async () => {
                 <template v-else>1 prompt image (judul 2 baris + footer kecil lihat caption / like-share-follow) + caption ber-solusi + CTA.</template>
             </p>
             <div class="mt-4 space-y-2">
+                <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-semibold text-slate-500">Brand Kit / profil</span>
+                    <select v-model="brandKitId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option v-for="k in brandKits" :key="k.id" :value="String(k.id)">
+                            {{ k.name }} · {{ k.niche }} · {{ k.region || 'ID' }}{{ k.is_active ? ' (aktif)' : '' }}
+                        </option>
+                    </select>
+                </label>
                 <label class="block text-sm">
                     <span class="mb-1 block text-xs font-semibold text-slate-500">Referensi Analisa AI (opsional)</span>
                     <select v-model="analysisId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">

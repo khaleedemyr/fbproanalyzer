@@ -60,7 +60,7 @@ class BlueprintController extends Controller
         if ($blueprint->status !== 'generating' && count($blueprint->scenes ?? []) <= 120) {
             $markdown = app(BlueprintGeneratorService::class)->toMarkdown(
                 $blueprint,
-                $blueprint->brandKit ?? BrandKit::defaultFor($request->user())
+                $blueprint->brandKit ?? BrandKit::activeFor($request->user())
             );
         }
 
@@ -342,6 +342,7 @@ class BlueprintController extends Controller
             'prefer_stock' => ['sometimes', 'boolean'],
             'voice_perspective' => ['nullable', 'string', 'max:40'],
             'analytics_ai_analysis_id' => ['nullable', 'exists:analytics_ai_analyses,id'],
+            'brand_kit_id' => ['nullable', 'integer', 'exists:brand_kits,id'],
         ]);
 
         $user = $request->user();
@@ -355,6 +356,8 @@ class BlueprintController extends Controller
             abort_unless($analysis->user_id === $user->id, 403);
         }
 
+        $kit = BrandKit::resolveForUser($user, isset($data['brand_kit_id']) ? (int) $data['brand_kit_id'] : null);
+
         $options = array_filter([
             'duration_seconds' => $data['duration_seconds'] ?? null,
             'duration_minutes' => $data['duration_minutes'] ?? null,
@@ -366,6 +369,8 @@ class BlueprintController extends Controller
             'planned_time' => $data['planned_time'] ?? null,
             'force' => $force,
             'analytics_ai_analysis' => $analysis,
+            'brand_kit_id' => $kit->id,
+            'brand_kit' => $kit,
         ], fn ($v) => $v !== null);
 
         if (! empty($data['content_idea_id'])) {
@@ -377,7 +382,7 @@ class BlueprintController extends Controller
             $bp = $generator->generateFromSignal($user, $signal, $planned, $format, $force, $options);
         } else {
             abort_unless(filled($data['topic'] ?? null), 422, 'topic, content_idea_id, atau trend_signal_id wajib.');
-            $bp = $generator->generateFromTopic($user, (string) $data['topic'], null, null, null, $planned, $format, $force, $options);
+            $bp = $generator->generateFromTopic($user, (string) $data['topic'], $kit, null, null, $planned, $format, $force, $options);
         }
 
         $bp->load(['brandKit', 'analyticsAiAnalysis']);
@@ -401,7 +406,7 @@ class BlueprintController extends Controller
         return response()->json([
             'message' => $label,
             'data' => $bp,
-            'markdown' => $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::defaultFor($user)),
+            'markdown' => $generator->toMarkdown($bp, $bp->brandKit ?? BrandKit::activeFor($user)),
             'engine' => $engine,
             'duplicate' => $duplicate,
             'gemini_configured' => filled(config('blueprint.gemini_api_key')),
@@ -474,7 +479,7 @@ class BlueprintController extends Controller
     {
         abort_unless($blueprint->user_id === $request->user()->id, 403);
 
-        $kit = $blueprint->brandKit ?? BrandKit::defaultFor($request->user());
+        $kit = $blueprint->brandKit ?? BrandKit::activeFor($request->user());
         $md = $generator->toMarkdown($blueprint, $kit);
         $filename = 'blueprint-'.(Str::slug(Str::limit($blueprint->title, 60, '')) ?: 'reels').'.md';
 
@@ -501,7 +506,7 @@ class BlueprintController extends Controller
             'scope' => ['nullable', 'in:full,naskah'],
         ]);
 
-        $kit = $blueprint->brandKit ?? BrandKit::defaultFor($request->user());
+        $kit = $blueprint->brandKit ?? BrandKit::activeFor($request->user());
 
         return $exporter->download(
             $blueprint,
@@ -577,7 +582,7 @@ class BlueprintController extends Controller
             $topic,
             $format,
             $options,
-            BrandKit::defaultFor($user),
+            BrandKit::activeFor($user),
             $idea
         );
 

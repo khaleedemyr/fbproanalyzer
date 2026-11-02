@@ -17,13 +17,21 @@ class AutoRadarService
     }
 
     /**
-     * @return array{synced:int, sources:array<string,int>, ideas:int}
+     * @param  array{region?:string,niche?:string,keywords?:array<int,string>}|null  $options
+     * @return array{synced:int, sources:array<string,int>, ideas:int, region:string, niche:string}
      */
-    public function sync(?User $ideaUser = null): array
+    public function sync(?User $ideaUser = null, ?array $options = null): array
     {
-        $niche = config('radar.niche', 'psikologi');
-        $region = config('radar.region', 'ID');
-        $keywords = config('radar.keywords', []);
+        $region = strtoupper(trim((string) ($options['region'] ?? config('radar.region', 'ID'))));
+        if (! in_array($region, ['ID', 'US'], true)) {
+            $region = 'ID';
+        }
+        $niche = trim((string) ($options['niche'] ?? config('radar.niche', 'psikologi'))) ?: 'psikologi';
+        $keywords = $options['keywords'] ?? null;
+        if (! is_array($keywords) || $keywords === []) {
+            $keywords = $this->keywordsForNiche($niche, $region);
+        }
+        $keywords = array_values(array_filter(array_map('strval', $keywords)));
 
         $counts = [
             'google_trends' => 0,
@@ -35,6 +43,7 @@ class AutoRadarService
         // Hapus label lama "seed" agar tidak dobel dengan keyword_radar.
         TrendSignal::query()
             ->where('niche', $niche)
+            ->where('region', $region)
             ->where('source', 'seed')
             ->delete();
 
@@ -55,7 +64,7 @@ class AutoRadarService
             $this->upsert('keyword_radar', $niche, $region, [
                 'keyword' => $keyword,
                 'title' => $keyword,
-                'snippet' => 'Google minat relatif 7 hari: '.$interestScore.'/100 · pantauan otomatis niche psikologi.',
+                'snippet' => 'Google minat relatif 7 hari: '.$interestScore.'/100 · region '.$region.' · niche '.$niche.'.',
                 'url' => 'https://trends.google.com/trends/explore?geo='.$region.'&q='.urlencode($keyword),
                 'metric_value' => $metric,
                 'format' => 'topic',
@@ -63,12 +72,13 @@ class AutoRadarService
                 'raw' => [
                     'platform' => 'google',
                     'interest_7d' => $interestScore,
+                    'region' => $region,
                 ],
             ]);
             $counts['keyword_radar']++;
         }
 
-        $youtube = $this->youtubeTrends->fetchWithStatus($keywords);
+        $youtube = $this->youtubeTrends->fetchWithStatus($keywords, null, $region, $niche);
         foreach ($youtube['items'] as $item) {
             $this->upsert('youtube', $niche, $region, $item);
             $counts['youtube']++;
@@ -80,7 +90,7 @@ class AutoRadarService
 
         $ideas = 0;
         if ($ideaUser) {
-            $ideas = $this->generateIdeas($ideaUser);
+            $ideas = $this->generateIdeas($ideaUser, $niche, $region);
         }
 
         return [
@@ -88,8 +98,32 @@ class AutoRadarService
             'sources' => $counts,
             'ideas' => $ideas,
             'warnings' => $warnings,
+            'region' => $region,
+            'niche' => $niche,
             'youtube_configured' => filled(trim((string) config('radar.youtube_api_key'))),
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function keywordsForNiche(string $niche, string $region = 'ID'): array
+    {
+        $region = in_array(strtoupper($region), ['ID', 'US'], true) ? strtoupper($region) : 'ID';
+        $catalog = config('niches.'.$region, []);
+        $needle = Str::lower($niche);
+        foreach ($catalog as $row) {
+            $slug = Str::lower((string) ($row['slug'] ?? ''));
+            $label = Str::lower((string) ($row['label'] ?? ''));
+            if ($slug === $needle || str_contains($label, $needle) || str_contains($needle, $slug)) {
+                $kw = array_values(array_filter(array_map('strval', $row['keywords'] ?? [])));
+                if ($kw !== []) {
+                    return $kw;
+                }
+            }
+        }
+
+        return array_values(array_filter(array_map('strval', config('radar.keywords', []))));
     }
 
     /**
@@ -138,10 +172,13 @@ class AutoRadarService
         return round($base, 2);
     }
 
-    private function generateIdeas(User $user): int
+    private function generateIdeas(User $user, ?string $niche = null, ?string $region = null): int
     {
+        $niche = $niche ?: config('radar.niche', 'psikologi');
+        $region = $region ?: config('radar.region', 'ID');
         $signals = TrendSignal::query()
-            ->where('niche', config('radar.niche', 'psikologi'))
+            ->where('niche', $niche)
+            ->where('region', $region)
             ->where('observed_at', '>=', now()->subDays(3))
             ->orderByDesc('viral_score')
             ->limit(8)

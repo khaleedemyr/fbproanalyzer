@@ -85,7 +85,13 @@ class BlueprintGeneratorService
         bool $force = false,
         array $options = [],
     ): ContentBlueprint {
-        $kit = $brandKit ?? BrandKit::defaultFor($user);
+        if (! $brandKit && ! empty($options['brand_kit']) && $options['brand_kit'] instanceof BrandKit) {
+            $brandKit = $options['brand_kit'];
+        }
+        if (! $brandKit && ! empty($options['brand_kit_id'])) {
+            $brandKit = BrandKit::resolveForUser($user, (int) $options['brand_kit_id']);
+        }
+        $kit = $brandKit ?? BrandKit::activeFor($user);
         $topic = trim($topic) !== '' ? trim($topic) : 'Topik psikologi viral';
         $format = $this->normalizeFormat($format);
         $this->currentFormat = $format;
@@ -374,7 +380,10 @@ class BlueprintGeneratorService
         ?ContentBrief $brief = null,
         ?TrendSignal $signal = null,
     ): ContentBlueprint {
-        $kit = BrandKit::defaultFor($user);
+        $kitFromOpt = $options['brand_kit'] ?? null;
+        $kit = $kitFromOpt instanceof BrandKit
+            ? $kitFromOpt
+            : BrandKit::resolveForUser($user, isset($options['brand_kit_id']) ? (int) $options['brand_kit_id'] : null);
         $format = $this->normalizeFormat($format);
         $this->currentFormat = $format;
         $this->applyDurationOptions($format, $options);
@@ -1208,7 +1217,7 @@ PROMPT;
         ?BrandKit $brandKit = null,
         ?ContentIdea $idea = null,
     ): string {
-        $kit = $brandKit ?? BrandKit::defaultFor($user);
+        $kit = $brandKit ?? BrandKit::activeFor($user);
         $format = $this->normalizeFormat($format);
         $this->currentFormat = $format;
         $this->applyDurationOptions($format, $options);
@@ -1253,7 +1262,7 @@ EXTRA;
      */
     public function buildExportableMasterPromptForBlueprint(ContentBlueprint $blueprint, User $user): string
     {
-        $kit = $blueprint->brandKit ?? BrandKit::defaultFor($user);
+        $kit = $blueprint->brandKit ?? BrandKit::activeFor($user);
         $idea = $blueprint->contentIdea;
         $options = [
             'duration_seconds' => (int) ($blueprint->duration_seconds ?: $this->durationSeconds),

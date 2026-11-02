@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\YouTubeAuthController;
 use App\Http\Controllers\Api\BlueprintController;
 use App\Http\Controllers\Api\BrandKitController;
+use App\Http\Controllers\Api\NicheController;
 use App\Http\Controllers\Api\BriefStudioController;
 use App\Http\Controllers\Api\ContentIdeaController;
 use App\Http\Controllers\Api\ContentPostController;
@@ -74,6 +75,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('brand-kit', [BrandKitController::class, 'show']);
     Route::put('brand-kit', [BrandKitController::class, 'update']);
     Route::post('brand-kit/test-gemini', [BrandKitController::class, 'testGemini']);
+    Route::get('brand-kits', [BrandKitController::class, 'index']);
+    Route::post('brand-kits', [BrandKitController::class, 'store']);
+    Route::get('brand-kits/{brandKit}', [BrandKitController::class, 'showOne']);
+    Route::put('brand-kits/{brandKit}', [BrandKitController::class, 'updateOne']);
+    Route::post('brand-kits/{brandKit}/activate', [BrandKitController::class, 'activate']);
+    Route::delete('brand-kits/{brandKit}', [BrandKitController::class, 'destroy']);
+
+    Route::get('niches', [NicheController::class, 'index']);
+    Route::post('niches/refresh-rank', [NicheController::class, 'refreshRank']);
 
     Route::get('brief-studio/sources', [BriefStudioController::class, 'sources']);
     Route::get('brief-studio', [BriefStudioController::class, 'index']);

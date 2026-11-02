@@ -1,9 +1,12 @@
 <script setup>
+import { onMounted, ref } from 'vue';
 import { RouterLink, RouterView, useRouter } from 'vue-router';
+import http from '../api/http';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
+const activeKit = ref(null);
 
 const links = [
     { to: '/', label: 'Dashboard', name: 'dashboard' },
@@ -19,10 +22,23 @@ const links = [
     { to: '/accounts', label: 'Akun Meta', name: 'accounts' },
 ];
 
+async function loadActiveKit() {
+    try {
+        const { data } = await http.get('/brand-kits');
+        activeKit.value = data.active || (data.data || []).find((k) => k.is_active) || null;
+    } catch {
+        activeKit.value = null;
+    }
+}
+
 async function logout() {
     await auth.logout();
     router.push({ name: 'login' });
 }
+
+onMounted(loadActiveKit);
+
+defineExpose({ loadActiveKit });
 </script>
 
 <template>
@@ -34,6 +50,15 @@ async function logout() {
                     <h1 class="text-lg font-semibold text-slate-900">Viral Niche Radar</h1>
                 </div>
                 <div class="flex items-center gap-3">
+                    <RouterLink
+                        v-if="activeKit"
+                        to="/brand-kit"
+                        class="hidden max-w-[220px] rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-left sm:block"
+                        title="Ganti profil di Brand Kit"
+                    >
+                        <p class="truncate text-xs font-semibold text-teal-950">{{ activeKit.name }}</p>
+                        <p class="truncate text-[10px] text-teal-800">{{ activeKit.niche }} · {{ activeKit.region || 'ID' }}</p>
+                    </RouterLink>
                     <div class="hidden text-right sm:block">
                         <p class="text-sm font-medium text-slate-900">{{ auth.user?.name }}</p>
                         <p class="text-xs text-slate-500">{{ auth.user?.email }}</p>

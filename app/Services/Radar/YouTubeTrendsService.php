@@ -11,8 +11,12 @@ class YouTubeTrendsService
      * @param  array<int, string>  $keywords
      * @return array{items: array<int, array<string, mixed>>, error: ?string}
      */
-    public function fetchWithStatus(array $keywords, ?string $apiKey = null): array
-    {
+    public function fetchWithStatus(
+        array $keywords,
+        ?string $apiKey = null,
+        string $region = 'ID',
+        string $nicheHint = '',
+    ): array {
         $apiKey = trim((string) ($apiKey ?: config('radar.youtube_api_key')));
         if ($apiKey === '') {
             return [
@@ -21,13 +25,14 @@ class YouTubeTrendsService
             ];
         }
 
+        $region = strtoupper($region) === 'US' ? 'US' : 'ID';
         $since = now()->subDays(21)->utc()->format('Y-m-d\TH:i:s\Z');
         $items = [];
         $lastError = null;
 
         foreach (array_slice($keywords, 0, 5) as $keyword) {
             try {
-                $videos = $this->searchVideos($keyword, $apiKey, $since);
+                $videos = $this->searchVideos($keyword, $apiKey, $since, $region, $nicheHint);
                 foreach ($videos as $video) {
                     $items[] = $video;
                 }
@@ -57,19 +62,30 @@ class YouTubeTrendsService
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function searchVideos(string $keyword, string $apiKey, string $since): array
-    {
+    private function searchVideos(
+        string $keyword,
+        string $apiKey,
+        string $since,
+        string $region = 'ID',
+        string $nicheHint = '',
+    ): array {
+        $lang = $region === 'US' ? 'en' : 'id';
+        $suffix = $region === 'US'
+            ? trim($nicheHint !== '' ? $nicheHint : 'psychology')
+            : trim($nicheHint !== '' ? $nicheHint : 'psikologi');
+        $fallbackQ = $region === 'US' ? $keyword.' USA' : $keyword.' Indonesia';
+
         $response = Http::timeout(25)
             ->withHeaders($this->browserHeaders())
             ->get('https://www.googleapis.com/youtube/v3/search', [
                 'part' => 'snippet',
-                'q' => $keyword.' psikologi',
+                'q' => trim($keyword.' '.$suffix),
                 'type' => 'video',
                 'order' => 'viewCount',
                 'publishedAfter' => $since,
                 'maxResults' => 4,
-                'relevanceLanguage' => 'id',
-                'regionCode' => 'ID',
+                'relevanceLanguage' => $lang,
+                'regionCode' => $region,
                 'key' => $apiKey,
             ]);
 
@@ -86,12 +102,12 @@ class YouTubeTrendsService
                 ->withHeaders($this->browserHeaders())
                 ->get('https://www.googleapis.com/youtube/v3/search', [
                     'part' => 'snippet',
-                    'q' => $keyword.' Indonesia',
+                    'q' => $fallbackQ,
                     'type' => 'video',
                     'order' => 'relevance',
                     'maxResults' => 4,
-                    'relevanceLanguage' => 'id',
-                    'regionCode' => 'ID',
+                    'relevanceLanguage' => $lang,
+                    'regionCode' => $region,
                     'key' => $apiKey,
                 ]);
 

@@ -142,7 +142,7 @@ class BriefStudioService
             );
         }
 
-        $kit = BrandKit::defaultFor($user);
+        $kit = BrandKit::resolveForUser($user, isset($filters['brand_kit_id']) ? (int) $filters['brand_kit_id'] : null);
         $sequel = SequelContext::normalize($filters);
         $topic = trim((string) ($filters['topic'] ?? $picked['seed_topic'] ?? ''));
         if ($topic === '') {
@@ -276,6 +276,11 @@ class BriefStudioService
             ])->save();
         }
 
+        $kit = BrandKit::resolveForUser(
+            $user,
+            isset($options['brand_kit_id']) ? (int) $options['brand_kit_id'] : null
+        );
+
         $bpOptions = array_filter([
             'duration_seconds' => $options['duration_seconds'] ?? null,
             'duration_minutes' => $options['duration_minutes'] ?? null,
@@ -296,6 +301,8 @@ class BriefStudioService
             'episode_number' => $sequel['episode_number'],
             'parent_blueprint_id' => $sequel['parent_blueprint_id'],
             'previous_episodes' => $sequel['previous_episodes'] !== [] ? $sequel['previous_episodes'] : null,
+            'brand_kit_id' => $kit->id,
+            'brand_kit' => $kit,
         ], fn ($v) => $v !== null);
 
         // Reels panjang (5–60 mnt): stub + generate AFTER response → proxy tidak putus.
@@ -340,7 +347,7 @@ class BriefStudioService
             $bp = $this->blueprints->generateFromTopic(
                 $user,
                 $topic,
-                null,
+                $kit,
                 null,
                 null,
                 $options['planned_date'] ?? null,

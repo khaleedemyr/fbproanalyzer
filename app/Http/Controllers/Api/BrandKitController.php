@@ -7,12 +7,31 @@ use App\Models\BrandKit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\Rule;
 
 class BrandKitController extends Controller
 {
+    public function index(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        BrandKit::defaultFor($user); // ensure at least one
+
+        $kits = BrandKit::query()
+            ->where('user_id', $user->id)
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'data' => $kits,
+            'active' => BrandKit::activeFor($user),
+        ]);
+    }
+
+    /** Alias: kit aktif (backward compatible). */
     public function show(Request $request): JsonResponse
     {
-        $kit = BrandKit::defaultFor($request->user());
+        $kit = BrandKit::activeFor($request->user());
         $key = trim((string) config('blueprint.gemini_api_key', ''), " \t\n\r\0\x0B\"'");
 
         return response()->json([
@@ -20,6 +39,93 @@ class BrandKitController extends Controller
             'gemini_configured' => $key !== '',
             'gemini_model' => config('blueprint.gemini_model'),
             'gemini_key_hint' => $key !== '' ? (substr($key, 0, 6).'…'.substr($key, -4)) : null,
+        ]);
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $data = $this->validatedKit($request, $user->id);
+
+        $kit = BrandKit::query()->create(array_merge(
+            BrandKit::defaultAttributes(),
+            $data,
+            [
+                'user_id' => $user->id,
+                'region' => BrandKit::normalizeRegion($data['region'] ?? 'ID'),
+                'is_active' => false,
+            ]
+        ));
+
+        if (! BrandKit::query()->where('user_id', $user->id)->where('is_active', true)->exists()) {
+            $kit->activate();
+        }
+
+        return response()->json(['data' => $kit->fresh(), 'message' => 'Profil Brand Kit dibuat.'], 201);
+    }
+
+    public function showOne(Request $request, BrandKit $brandKit): JsonResponse
+    {
+        abort_unless($brandKit->user_id === $request->user()->id, 403);
+
+        return response()->json(['data' => $brandKit]);
+    }
+
+    public function updateOne(Request $request, BrandKit $brandKit): JsonResponse
+    {
+        abort_unless($brandKit->user_id === $request->user()->id, 403);
+        $data = $this->validatedKit($request, $request->user()->id, $brandKit->id);
+        if (isset($data['region'])) {
+            $data['region'] = BrandKit::normalizeRegion($data['region']);
+        }
+        $brandKit->update($data);
+
+        return response()->json(['data' => $brandKit->fresh(), 'message' => 'Brand Kit disimpan.']);
+    }
+
+    /** Alias update kit aktif. */
+    public function update(Request $request): JsonResponse
+    {
+        $kit = BrandKit::activeFor($request->user());
+        $data = $this->validatedKit($request, $request->user()->id, $kit->id);
+        if (isset($data['region'])) {
+            $data['region'] = BrandKit::normalizeRegion($data['region']);
+        }
+        $kit->update($data);
+
+        return response()->json(['data' => $kit->fresh()]);
+    }
+
+    public function activate(Request $request, BrandKit $brandKit): JsonResponse
+    {
+        abort_unless($brandKit->user_id === $request->user()->id, 403);
+        $brandKit->activate();
+
+        return response()->json([
+            'data' => $brandKit->fresh(),
+            'message' => 'Profil diaktifkan: '.$brandKit->name,
+        ]);
+    }
+
+    public function destroy(Request $request, BrandKit $brandKit): JsonResponse
+    {
+        abort_unless($brandKit->user_id === $request->user()->id, 403);
+
+        $count = BrandKit::query()->where('user_id', $request->user()->id)->count();
+        if ($count <= 1) {
+            return response()->json(['message' => 'Tidak bisa hapus — minimal satu Brand Kit.'], 422);
+        }
+
+        $wasActive = $brandKit->is_active;
+        $brandKit->delete();
+
+        if ($wasActive) {
+            BrandKit::activeFor($request->user());
+        }
+
+        return response()->json([
+            'message' => 'Brand Kit dihapus.',
+            'active' => BrandKit::activeFor($request->user()),
         ]);
     }
 
@@ -81,12 +187,19 @@ class BrandKitController extends Controller
         ], 422);
     }
 
-    public function update(Request $request): JsonResponse
+    /**
+     * @return array<string, mixed>
+     */
+    protected function validatedKit(Request $request, int $userId, ?int $ignoreId = null): array
     {
-        $kit = BrandKit::defaultFor($request->user());
-
-        $data = $request->validate([
-            'name' => ['sometimes', 'string', 'max:80'],
+        return $request->validate([
+            'name' => [
+                'sometimes',
+                'required',
+                'string',
+                'max:80',
+                Rule::unique('brand_kits', 'name')->where(fn ($q) => $q->where('user_id', $userId))->ignore($ignoreId),
+            ],
             'niche' => ['sometimes', 'string', 'max:80'],
             'character_name' => ['sometimes', 'string', 'max:80'],
             'character_visual' => ['nullable', 'string'],
@@ -97,10 +210,7 @@ class BrandKitController extends Controller
             'caption_hashtags' => ['nullable', 'string'],
             'image_tool' => ['nullable', 'string', 'max:60'],
             'video_tool' => ['nullable', 'string', 'max:60'],
+            'region' => ['nullable', 'in:ID,US'],
         ]);
-
-        $kit->update($data);
-
-        return response()->json(['data' => $kit->fresh()]);
     }
 }

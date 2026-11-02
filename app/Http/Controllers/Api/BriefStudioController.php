@@ -70,6 +70,7 @@ class BriefStudioController extends Controller
             'episode_number' => ['nullable', 'integer', 'min:1', 'max:99'],
             'parent_blueprint_id' => ['nullable', 'integer', 'exists:content_blueprints,id'],
             'previous_episodes' => ['nullable'],
+            'brand_kit_id' => ['nullable', 'integer', 'exists:brand_kits,id'],
         ]);
 
         try {
@@ -127,6 +128,7 @@ class BriefStudioController extends Controller
                 'episode_number' => ['nullable', 'integer', 'min:1', 'max:99'],
                 'parent_blueprint_id' => ['nullable', 'integer', 'exists:content_blueprints,id'],
                 'previous_episodes' => ['nullable'],
+                'brand_kit_id' => ['nullable', 'integer', 'exists:brand_kits,id'],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

@@ -29,6 +29,8 @@ const seriesTitle = ref('');
 const episodeNumber = ref(null);
 const parentBlueprintId = ref(null);
 const previousEpisodesText = ref('');
+const brandKits = ref([]);
+const brandKitId = ref('');
 
 const formatLabel = {
     reels_vo: 'Reels VO',
@@ -211,6 +213,17 @@ async function loadHistory() {
     }
 }
 
+async function loadBrandKits() {
+    try {
+        const { data } = await http.get('/brand-kits');
+        brandKits.value = data.data || [];
+        const active = data.active || brandKits.value.find((k) => k.is_active);
+        brandKitId.value = active ? String(active.id) : (brandKits.value[0] ? String(brandKits.value[0].id) : '');
+    } catch {
+        brandKits.value = [];
+    }
+}
+
 async function compose() {
     if (!topic.value.trim()) {
         error.value = 'Pilih tema saran atau ketik topik dulu, baru Compose Resume.';
@@ -221,6 +234,7 @@ async function compose() {
     error.value = '';
     try {
         const payload = { topic: topic.value.trim() };
+        if (brandKitId.value) payload.brand_kit_id = Number(brandKitId.value);
         if (sources.value?.radar?.length) {
             payload.trend_signal_ids = sources.value.radar.map((r) => r.id);
         }
@@ -306,6 +320,7 @@ async function makeBlueprint() {
         } else if (isVo.value) {
             payload.duration_seconds = Number(durationSeconds.value);
         }
+        if (brandKitId.value) payload.brand_kit_id = Number(brandKitId.value);
         if (seriesTitle.value.trim()) payload.series_title = seriesTitle.value.trim();
         if (episodeNumber.value) payload.episode_number = Number(episodeNumber.value);
         if (parentBlueprintId.value) payload.parent_blueprint_id = Number(parentBlueprintId.value);
@@ -348,8 +363,7 @@ function openBrief(row) {
 
 onMounted(async () => {
     applySequelFromQuery();
-    await loadSources();
-    await loadHistory();
+    await Promise.all([loadSources(), loadBrandKits(), loadHistory()]);
 });
 </script>
 
@@ -387,6 +401,14 @@ onMounted(async () => {
         <div v-for="w in warnings" :key="w" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">{{ w }}</div>
 
         <section class="rounded-xl border border-slate-200 bg-white p-5">
+            <label class="mb-3 block text-sm">
+                <span class="mb-1 block text-xs font-semibold text-slate-500">Brand Kit / profil</span>
+                <select v-model="brandKitId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    <option v-for="k in brandKits" :key="k.id" :value="String(k.id)">
+                        {{ k.name }} · {{ k.niche }} · {{ k.region || 'ID' }}{{ k.is_active ? ' (aktif)' : '' }}
+                    </option>
+                </select>
+            </label>
             <label class="block text-sm">
                 <span class="mb-1 block text-xs font-semibold text-slate-500">Topik pembahasan (wajib dipilih / diketik sebelum Compose)</span>
                 <input
